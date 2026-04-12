@@ -1,3 +1,6 @@
+import random
+import kociemba
+
 def create_solved_cube():
     return ['U', 'U', 'U', 'U', 'U', 'U', 'U', 'U', 'U', 
             'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R', 'R',
@@ -114,12 +117,25 @@ def moves(cube, move_sequence):
         else:
             clockwise_rotation(cube, move)
 
+def scramble_generator():
+    faces = ['R', 'U', 'L', 'F', 'D', 'B']
+    modifiers = ['', "'", '2']
+    scramble = []
+    length = random.randint(20, 25)  
+    last_face = None
+    for _ in range(length):
+        valid_faces = [f for f in faces if f != last_face]
+        face = random.choice(valid_faces)
+        last_face = face
+        modifier = random.choice(modifiers)
+        scramble.append(face + modifier)
+    return scramble
 
 cube = create_solved_cube()
 # print_cube(cube)
 # print_cube_indices(cube)
-sequence = "D' B2 R2 U L2 U2 F2 U' R2 D' L' U' R' F2 L'".split()
-moves(cube, sequence)
-sequence_2 = "L F2 R U L D R2 U F2 U2 L2 U' R2 B2 D".split()
-moves(cube, sequence_2)
-print_cube(cube)    
+scramble = scramble_generator()
+moves(cube, ['R', 'U'])
+kociemba_solution = kociemba.solve(''.join(cube))
+moves(cube, kociemba_solution.split())
+print_cube(cube)
