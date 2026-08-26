@@ -42,6 +42,10 @@ mean one thing in PLL and another in OLL.
 | `s` / `o` | save the selection under a name / open a saved one |
 | `enter` | start drilling |
 
+Nothing is selected to begin with, so choosing three cases is three keypresses
+rather than eighteen. Chosen cases are ringed in green; the cursor is the ring
+inside the tile. Your last selection comes back next time you open the picker.
+
 In the drill, hold `space` until it turns green, release to start, and press it
 again when the cube is solved. The case is hidden while you work: recognising
 it is most of the skill. Press `p` to reveal it and its algorithm — that rep is

@@ -133,7 +133,7 @@ class PickerScreen(Screen):
         self.message = None
         restored = (app.store.load_case_set(LAST_USED, self.phase)
                     if mode == "select" else None)
-        self.selected = set(restored or [c.id for c in self.order])
+        self.selected = set(restored or [])
         self.states = {
             c.id: Cube.solved().apply(c.setup) for c in self.order
         }
@@ -257,20 +257,17 @@ class PickerScreen(Screen):
             theme.text(surface, f"{len(self.selected)} of {len(self.order)} selected",
                        (WINDOW[0] - 40, 36), 20, ACCENT, right=True)
 
-        marker = max(4, self.tile // 22)
         for group, label_top, placed in self.rows():
             theme.text(surface, group.upper(), (MARGIN, label_top), 16, TEXT_DIM, True)
             for case, rect in placed:
                 position = self.order.index(case)
+                chosen = self.mode == "select" and case.id in self.selected
                 render.draw_thumbnail(
                     surface, self.states[case.id], rect, self.label_for(case),
-                    selected=(position == self.cursor),
-                    dim=(self.mode == "select" and case.id not in self.selected),
+                    cursor=(position == self.cursor),
+                    chosen=chosen,
+                    dim=(self.mode == "select" and not chosen),
                 )
-                if self.mode == "select" and case.id in self.selected:
-                    pygame.draw.circle(surface, READY,
-                                       (rect.right - 2 * marker, rect.top + 2 * marker),
-                                       marker)
 
         self._draw_detail(surface, self.detail_top)
         self._draw_help(surface)

@@ -21,8 +21,8 @@ import math
 import pygame
 
 from ..cases.pattern import CENTRE_U, is_last_layer_oriented, u_layer_permutation
-from .theme import (FACE_COLOURS, GRID_LINE, HIDDEN, ORIENTED, TEXT_DIM,
-                    UNORIENTED, font)
+from .theme import (ACCENT, FACE_COLOURS, GRID_LINE, HIDDEN, ORIENTED, READY,
+                    TEXT, TEXT_DIM, TILE, TILE_FOCUS, UNORIENTED, font)
 
 # Slot positions on the 3x3 grid, as (row, column) with row 0 at the back.
 # Order matches CORNER_SLOTS and EDGE_SLOTS in cases.pattern.
@@ -128,31 +128,63 @@ def _draw_permutation_arrows(surface, cube, inner, cell):
             _draw_arrow(surface, start, end, cell)
 
 
+def arrow_shaft_width(cell):
+    """How thick an arrow's shaft is drawn, for a face of `cell`-wide stickers.
+
+    Deliberately thin. A case like the H perm crosses one small square with
+    four arrows at once, and a heavy line turns that into a scribble nobody
+    can trace a single piece through. The head carries the meaning; the shaft
+    only has to be followable.
+    """
+    return max(1, round(cell * 0.045))
+
+
 def _draw_arrow(surface, start, end, cell):
+    """One arrow, from where a piece is to where it belongs.
+
+    The shaft stops where the head begins rather than running under it, so the
+    head stays a clean triangle instead of a blob with a line through it.
+    """
     dx, dy = end[0] - start[0], end[1] - start[1]
     length = math.hypot(dx, dy)
     if length < 1:
         return
     ux, uy = dx / length, dy / length
-    inset = cell * 0.26
+    inset = cell * 0.22
+    span = length - 2 * inset
+    if span <= 0:
+        return
+    # A hop to the next sticker leaves little room. The head gives way rather
+    # than overrunning the tail, so that even the shortest arrow keeps a shaft
+    # long enough to say which two stickers it joins.
+    barb = min(cell * 0.28, span * 0.5)
     tail = (start[0] + ux * inset, start[1] + uy * inset)
     head = (end[0] - ux * inset, end[1] - uy * inset)
-    width = max(3, round(cell * 0.07))
-    pygame.draw.line(surface, GRID_LINE, tail, head, width + 2)
-    barb = cell * 0.2
-    left = (head[0] - ux * barb - uy * barb * 0.55, head[1] - uy * barb + ux * barb * 0.55)
-    right = (head[0] - ux * barb + uy * barb * 0.55, head[1] - uy * barb - ux * barb * 0.55)
+    neck = (head[0] - ux * barb, head[1] - uy * barb)
+    pygame.draw.line(surface, GRID_LINE, tail, neck, arrow_shaft_width(cell))
+    spread = barb * 0.42
+    left = (neck[0] - uy * spread, neck[1] + ux * spread)
+    right = (neck[0] + uy * spread, neck[1] - ux * spread)
     pygame.draw.polygon(surface, GRID_LINE, [head, left, right])
 
 
-def draw_thumbnail(surface, cube, rect, label, selected=False, dim=False):
-    """A small case picture with its name, for the picker and the library."""
-    background = (44, 52, 66) if selected else (30, 33, 39)
-    pygame.draw.rect(surface, background, rect, border_radius=6)
-    if selected:
-        pygame.draw.rect(surface, (94, 168, 255), rect, 2, border_radius=6)
+def draw_thumbnail(surface, cube, rect, label, cursor=False, chosen=False,
+                   dim=False):
+    """A small case picture with its name, for the picker and the library.
+
+    Two separate facts share one tile: whether the cursor is on it, and whether
+    it has been chosen to drill. They get different marks -- the tile's own
+    border for chosen, a ring inside it for the cursor -- because a cuber
+    reading the grid has to see both at once, including on the tile where they
+    coincide.
+    """
+    pygame.draw.rect(surface, TILE_FOCUS if cursor else TILE, rect, border_radius=6)
+    if chosen:
+        pygame.draw.rect(surface, READY, rect, 2, border_radius=6)
+    if cursor:
+        pygame.draw.rect(surface, ACCENT, rect.inflate(-6, -6), 2, border_radius=4)
     picture = pygame.Rect(0, 0, rect.width - 16, rect.height - 30)
     picture.midtop = (rect.centerx, rect.top + 6)
     draw_case(surface, cube, picture, arrows=True)
-    rendered = font(15, bold=selected).render(label, True, TEXT_DIM if dim else (236, 238, 242))
+    rendered = font(15, bold=cursor).render(label, True, TEXT_DIM if dim else TEXT)
     surface.blit(rendered, rendered.get_rect(midbottom=(rect.centerx, rect.bottom - 5)))

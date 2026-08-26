@@ -5,6 +5,8 @@ so everything drawn here is read out of the cube state the trainer built. These
 tests read the pixels back and check what a cuber would actually be looking at.
 """
 
+import math
+
 import pygame
 import pytest
 
@@ -149,3 +151,82 @@ def test_a_permutation_case_still_draws_its_arrows():
 def test_hidden_blanks_a_permutation_case():
     assert _drawn(_state(pll.get("T")), hidden=True) <= {
         HIDDEN, (1, 2, 3), render.GRID_LINE}
+
+
+# --- arrows stay readable when several cross --------------------------------
+
+def _face_ink(cube, rect, arrows):
+    """Pixels the diagram paints in the grid colour inside the upper face."""
+    surface = pygame.Surface((rect.width + 40, rect.height + 40))
+    surface.fill((1, 2, 3))
+    render.draw_case(surface, cube, rect, arrows=arrows)
+    cells = render.face_grid(rect)
+    face = cells[0].union(cells[-1])
+    return sum(1 for x in range(face.left, face.right)
+               for y in range(face.top, face.bottom)
+               if surface.get_at((x, y))[:3] == render.GRID_LINE), face
+
+
+def test_the_shaft_is_thin_at_the_size_a_thumbnail_draws_it():
+    """A picker tile gives each sticker about twenty pixels. Anything but a
+    hairline there is a scribble."""
+    assert render.arrow_shaft_width(20) == 1
+    for cell in range(8, 120):
+        # A twentieth of a sticker, give or take the whole pixel it rounds to.
+        assert render.arrow_shaft_width(cell) <= max(1, cell * 0.05 + 0.5)
+        assert render.arrow_shaft_width(cell) >= 1
+
+
+def test_arrows_leave_the_face_readable_when_four_of_them_cross():
+    """The H perm sends every edge across the middle at once. If the arrows are
+    heavy the face turns into one dark smear, which is what a cuber means by
+    jumbled -- so the ink they add is budgeted."""
+    thumbnail = pygame.Rect(0, 0, 74, 74)
+    state = _state(pll.get("H"))
+    without, face = _face_ink(state, thumbnail, arrows=False)
+    with_arrows, _ = _face_ink(state, thumbnail, arrows=True)
+    added = with_arrows - without
+    assert added > 0, "no arrows were drawn at all"
+    assert added < 0.12 * face.width * face.height, \
+        f"arrows cover {added / (face.width * face.height):.0%} of the face"
+
+
+def test_every_arrow_ends_in_an_arrow_head():
+    """The line says two pieces are involved; only the head says which way."""
+    heads = []
+    original = pygame.draw.polygon
+    pygame.draw.polygon = lambda surface, colour, points, *a, **k: (
+        heads.append(points) or original(surface, colour, points, *a, **k))
+    arrows = []
+    draw_arrow = render._draw_arrow
+    render._draw_arrow = lambda *a, **k: (
+        arrows.append(a) or draw_arrow(*a, **k))
+    try:
+        render.draw_case(pygame.Surface((260, 260)), _state(pll.get("T")), RECT)
+    finally:
+        pygame.draw.polygon = original
+        render._draw_arrow = draw_arrow
+    assert arrows, "the T perm moves pieces, so something has to point at them"
+    assert len(heads) == len(arrows)
+    assert all(len(points) == 3 for points in heads)
+
+
+def test_the_head_sits_at_the_end_the_piece_is_going_to():
+    """An arrow head on the wrong end is a wrong answer, not a blemish."""
+    heads = []
+    original = pygame.draw.polygon
+    pygame.draw.polygon = lambda surface, colour, points, *a, **k: (
+        heads.append(points) or original(surface, colour, points, *a, **k))
+    starts = []
+    draw_arrow = render._draw_arrow
+    render._draw_arrow = lambda surface, start, end, cell: (
+        starts.append((start, end)) or draw_arrow(surface, start, end, cell))
+    try:
+        render.draw_case(pygame.Surface((260, 260)), _state(pll.get("Ua")), RECT)
+    finally:
+        pygame.draw.polygon = original
+        render._draw_arrow = draw_arrow
+    for (start, end), points in zip(starts, heads):
+        tip = points[0]
+        assert math.dist(tip, end) < math.dist(tip, start), \
+            "the head is nearer the piece's home than its destination"

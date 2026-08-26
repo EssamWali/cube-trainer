@@ -14,6 +14,7 @@ from cubetrainer.store import Store
 from cubetrainer.trainer.timer import TimerState
 from cubetrainer.ui import render
 from cubetrainer.ui.app import App, DrillScreen, HomeScreen, PickerScreen, StatsScreen
+from cubetrainer.ui.theme import ACCENT, READY
 
 
 @pytest.fixture()
@@ -540,3 +541,85 @@ def test_the_statistics_can_be_given_the_phases_to_rank(app):
     assert [r.case_id for r in stats.reports] == first_ids(oll)
     key_down(stats, app, pygame.K_RIGHT)
     assert stats.catalogue is oll
+
+
+# --- choosing cases ---------------------------------------------------------
+
+def tile_of(picker, case_id):
+    for _, _, cases in picker.rows():
+        for case, rect in cases:
+            if case.id == case_id:
+                return rect
+    raise AssertionError(f"{case_id} is not on the grid")
+
+
+def border_colours(surface, rect):
+    """The colours painted along a tile's own edge, corners excluded."""
+    inset = 8
+    edge = [(x, rect.top) for x in range(rect.left + inset, rect.right - inset)]
+    edge += [(x, rect.bottom - 1) for x in range(rect.left + inset, rect.right - inset)]
+    edge += [(rect.left, y) for y in range(rect.top + inset, rect.bottom - inset)]
+    edge += [(rect.right - 1, y) for y in range(rect.top + inset, rect.bottom - inset)]
+    return {surface.get_at(point)[:3] for point in edge}
+
+
+def test_nothing_is_chosen_until_the_cuber_chooses_it(app, catalogue):
+    """Arriving with all fifty-seven selected means "drill these three" starts
+    with deselecting fifty-four."""
+    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+    assert picker.selected == set()
+
+
+def test_a_all_chooses_every_case_and_n_clears_them(app, catalogue):
+    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+    key_down(picker, app, pygame.K_a)
+    assert picker.selected == {c.id for c in catalogue}
+    key_down(picker, app, pygame.K_n)
+    assert picker.selected == set()
+
+
+def test_a_chosen_case_is_ringed_in_green(app, catalogue):
+    """The mark has to survive being glanced at across a grid, which a dot in
+    one corner does not."""
+    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+    surface = pygame.Surface((1180, 780))
+    chosen_id = picker.current.id
+    rect = tile_of(picker, chosen_id)
+
+    picker.draw(surface)
+    assert READY not in border_colours(surface, rect)
+
+    key_down(picker, app, pygame.K_SPACE)
+    assert picker.selected == {chosen_id}
+    picker.draw(surface)
+    assert READY in border_colours(surface, rect)
+
+    key_down(picker, app, pygame.K_SPACE)
+    picker.draw(surface)
+    assert READY not in border_colours(surface, rect)
+
+
+def test_the_cursor_and_the_choice_are_both_visible_on_one_tile(app, catalogue):
+    """They are different facts, and the tile the cursor is on is exactly the
+    tile you are about to choose."""
+    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+    surface = pygame.Surface((1180, 780))
+    key_down(picker, app, pygame.K_a)
+    picker.draw(surface)
+    rect = tile_of(picker, picker.current.id)
+    painted = {surface.get_at((x, y))[:3]
+               for x in range(rect.left, rect.right)
+               for y in range(rect.top, rect.bottom)}
+    assert READY in painted, "chosen is not marked"
+    assert ACCENT in painted, "the cursor is not marked"
+
+
+def test_the_library_marks_nothing_as_chosen(app, catalogue):
+    """Browsing is not choosing; a green border there would promise a drill
+    that is not about to happen."""
+    picker = PickerScreen(app, mode="browse", catalogue=catalogue)
+    surface = pygame.Surface((1180, 780))
+    picker.draw(surface)
+    for _, _, cases in picker.rows():
+        for _, rect in cases:
+            assert READY not in border_colours(surface, rect)

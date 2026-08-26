@@ -25,6 +25,10 @@ RUNNING = (236, 238, 242)
 DANGER = (232, 84, 84)
 HIDDEN = (58, 63, 72)
 
+# A case tile in the picker, and the same tile with the cursor on it.
+TILE = (30, 33, 39)
+TILE_FOCUS = (44, 52, 66)
+
 # An orientation diagram asks one question of every sticker -- is it facing up
 # -- so it is drawn in the two colours that question has answers. The upper
 # face keeps its own colour; everything else goes grey, because which colour it
