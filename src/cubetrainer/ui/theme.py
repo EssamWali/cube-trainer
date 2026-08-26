@@ -26,8 +26,19 @@ DANGER = (232, 84, 84)
 HIDDEN = (58, 63, 72)
 
 # A case tile in the picker, and the same tile with the cursor on it.
-TILE = (30, 33, 39)
-TILE_FOCUS = (44, 52, 66)
+TILE = (38, 42, 51)
+TILE_FOCUS = (58, 67, 84)
+
+# The card a case is drawn on. Giving the diagram its own ground rather than
+# letting it sit straight on the tile is what stops the side stickers reading
+# as loose confetti.
+DIAGRAM = (22, 24, 29)
+
+# An arrow crosses yellow stickers and the near-black lines between them, so it
+# carries its own contrast instead of borrowing it: a dark line inside a pale
+# casing is legible over either.
+ARROW = (14, 15, 19)
+ARROW_CASING = (247, 248, 252)
 
 # An orientation diagram asks one question of every sticker -- is it facing up
 # -- so it is drawn in the two colours that question has answers. The upper

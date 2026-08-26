@@ -295,8 +295,8 @@ def first_ids(catalogue, count=1):
 def test_the_picker_shows_every_case_of_its_phase_grouped_by_shape(app, catalogue):
     picker = PickerScreen(app, mode="select", catalogue=catalogue)
     assert len(picker.order) == len(catalogue)
-    assert [group for group, _, _ in picker.rows()] == list(catalogue.group_order)
-    placed = [case.id for _, _, cases in picker.rows() for case, _ in cases]
+    assert [group for group, _, _ in picker.blocks] == list(catalogue.group_order)
+    placed = [case.id for case, _ in picker.tiles()]
     assert sorted(placed) == sorted(c.id for c in catalogue)
 
 
@@ -305,10 +305,9 @@ def test_every_case_is_drawn_on_the_screen(app, catalogue):
     bottom of the window, and a case you cannot see is a case you cannot pick."""
     picker = PickerScreen(app, mode="select", catalogue=catalogue)
     window = pygame.Rect(0, 0, *app.surface.get_size())
-    for _, _, cases in picker.rows():
-        for case, rect in cases:
-            assert window.contains(rect), f"{case.id} is off the screen"
-            assert rect.bottom <= picker.detail_top, f"{case.id} covers the detail"
+    for case, rect in picker.tiles():
+        assert window.contains(rect), f"{case.id} is off the screen"
+        assert rect.bottom <= picker.detail_top, f"{case.id} covers the detail"
 
 
 def test_a_named_case_set_belongs_to_one_phase_only(app):
@@ -546,10 +545,9 @@ def test_the_statistics_can_be_given_the_phases_to_rank(app):
 # --- choosing cases ---------------------------------------------------------
 
 def tile_of(picker, case_id):
-    for _, _, cases in picker.rows():
-        for case, rect in cases:
-            if case.id == case_id:
-                return rect
+    for case, rect in picker.tiles():
+        if case.id == case_id:
+            return rect
     raise AssertionError(f"{case_id} is not on the grid")
 
 
@@ -620,6 +618,39 @@ def test_the_library_marks_nothing_as_chosen(app, catalogue):
     picker = PickerScreen(app, mode="browse", catalogue=catalogue)
     surface = pygame.Surface((1180, 780))
     picker.draw(surface)
-    for _, _, cases in picker.rows():
-        for _, rect in cases:
-            assert READY not in border_colours(surface, rect)
+    for _, rect in picker.tiles():
+        assert READY not in border_colours(surface, rect)
+
+
+def test_families_are_laid_out_side_by_side_rather_than_one_per_band(app):
+    """Fifteen families each taking a full band would not fit on the screen at
+    any tile size worth looking at, so they are packed along a band and
+    wrapped."""
+    picker = PickerScreen(app, mode="select", catalogue=app.catalogues[1])
+    bands = {top for _, (_, top), _ in picker.blocks}
+    assert len(picker.blocks) == 15
+    assert len(bands) < len(picker.blocks), "every family is on its own band"
+
+
+def test_a_bigger_phase_does_not_mean_a_smaller_picture_than_it_needs(app):
+    """The tile size is the largest that fits, so an empty half-screen means
+    the layout gave up early."""
+    for catalogue in app.catalogues:
+        picker = PickerScreen(app, mode="select", catalogue=catalogue)
+        bigger = [t for t in picker.TILE_SIZES if t > picker.tile]
+        available = picker.detail_top - picker.GRID_TOP - 12
+        for tile in bigger:
+            _, height = picker._flow(tile)
+            assert height > available,                 f"{catalogue.phase} could have used {tile}px tiles"
+
+
+def test_up_and_down_move_between_families(app):
+    """The grid is not one rectangle any more, so moving down has to land on
+    whatever is actually below rather than counting a fixed stride."""
+    picker = PickerScreen(app, mode="select", catalogue=app.catalogues[1])
+    start = picker.rect_for(picker.current)
+    key_down(picker, app, pygame.K_DOWN)
+    below = picker.rect_for(picker.current)
+    assert below.centery > start.centery
+    key_down(picker, app, pygame.K_UP)
+    assert picker.rect_for(picker.current).centery == start.centery

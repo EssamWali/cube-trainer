@@ -21,8 +21,12 @@ import math
 import pygame
 
 from ..cases.pattern import CENTRE_U, is_last_layer_oriented, u_layer_permutation
-from .theme import (ACCENT, FACE_COLOURS, GRID_LINE, HIDDEN, ORIENTED, READY,
-                    TEXT, TEXT_DIM, TILE, TILE_FOCUS, UNORIENTED, font)
+from .theme import (ACCENT, ARROW, ARROW_CASING, DIAGRAM, FACE_COLOURS,
+                    GRID_LINE, HIDDEN, ORIENTED, READY, TEXT, TEXT_DIM, TILE,
+                    TILE_FOCUS, UNORIENTED, font)
+
+#: Height a thumbnail keeps below the picture for the case's name.
+LABEL_STRIP = 18
 
 # Slot positions on the 3x3 grid, as (row, column) with row 0 at the back.
 # Order matches CORNER_SLOTS and EDGE_SLOTS in cases.pattern.
@@ -84,6 +88,8 @@ def draw_case(surface, cube, rect, arrows=True, hidden=False):
 
     inner, cell, tab = _frame(rect)
     cells = face_grid(rect)
+    card = inner.inflate(2 * tab + cell * 0.1, 2 * tab + cell * 0.1)
+    pygame.draw.rect(surface, DIAGRAM, card, border_radius=max(2, round(cell * 0.12)))
 
     for position, base in enumerate(cells):
         pygame.draw.rect(surface, sticker(position), base)
@@ -161,11 +167,28 @@ def _draw_arrow(surface, start, end, cell):
     tail = (start[0] + ux * inset, start[1] + uy * inset)
     head = (end[0] - ux * inset, end[1] - uy * inset)
     neck = (head[0] - ux * barb, head[1] - uy * barb)
-    pygame.draw.line(surface, GRID_LINE, tail, neck, arrow_shaft_width(cell))
     spread = barb * 0.42
     left = (neck[0] - uy * spread, neck[1] + ux * spread)
     right = (neck[0] + uy * spread, neck[1] - ux * spread)
-    pygame.draw.polygon(surface, GRID_LINE, [head, left, right])
+    shaft = arrow_shaft_width(cell)
+    casing = max(1, round(cell * 0.03))
+    pygame.draw.line(surface, ARROW_CASING, tail, neck, shaft + 2 * casing)
+    pygame.draw.polygon(surface, ARROW_CASING,
+                        _spread_out([head, left, right], casing))
+    pygame.draw.line(surface, ARROW, tail, neck, shaft)
+    pygame.draw.polygon(surface, ARROW, [head, left, right])
+
+
+def _spread_out(points, amount):
+    """The same shape, `amount` pixels bigger in every direction."""
+    centre_x = sum(x for x, _ in points) / len(points)
+    centre_y = sum(y for _, y in points) / len(points)
+    grown = []
+    for x, y in points:
+        dx, dy = x - centre_x, y - centre_y
+        away = math.hypot(dx, dy) or 1.0
+        grown.append((x + dx / away * amount, y + dy / away * amount))
+    return grown
 
 
 def draw_thumbnail(surface, cube, rect, label, cursor=False, chosen=False,
@@ -183,8 +206,9 @@ def draw_thumbnail(surface, cube, rect, label, cursor=False, chosen=False,
         pygame.draw.rect(surface, READY, rect, 2, border_radius=6)
     if cursor:
         pygame.draw.rect(surface, ACCENT, rect.inflate(-6, -6), 2, border_radius=4)
-    picture = pygame.Rect(0, 0, rect.width - 16, rect.height - 30)
-    picture.midtop = (rect.centerx, rect.top + 6)
+    picture = pygame.Rect(0, 0, rect.width - 4, rect.height - LABEL_STRIP)
+    picture.midtop = (rect.centerx, rect.top + 2)
     draw_case(surface, cube, picture, arrows=True)
-    rendered = font(15, bold=cursor).render(label, True, TEXT_DIM if dim else TEXT)
-    surface.blit(rendered, rendered.get_rect(midbottom=(rect.centerx, rect.bottom - 5)))
+    size = 15 if rect.width >= 80 else 13
+    rendered = font(size, bold=cursor).render(label, True, TEXT_DIM if dim else TEXT)
+    surface.blit(rendered, rendered.get_rect(midbottom=(rect.centerx, rect.bottom - 2)))

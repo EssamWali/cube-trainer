@@ -45,6 +45,13 @@ There are 21 PLL cases and 57 OLL cases.
 A named group of cases a cuber has chosen to work on. Belongs to one phase, so
 two phases can each have a set of the same name.
 
+**Group**:
+A family of cases that look alike and are therefore learned and recognised
+together: the fish shapes, the G perms. A few are structural facts about the
+cube — every edge already oriented, no edge oriented — and the rest are
+silhouettes, which is a fact about how a case looks rather than one the cube
+can be asked about.
+
 **Catalogue**:
 Every case of one phase, together with the phase's name and the order its
 groups are shown in. What a screen is handed instead of a case list, so that

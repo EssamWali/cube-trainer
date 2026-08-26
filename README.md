@@ -46,6 +46,10 @@ Nothing is selected to begin with, so choosing three cases is three keypresses
 rather than eighteen. Chosen cases are ringed in green; the cursor is the ring
 inside the tile. Your last selection comes back next time you open the picker.
 
+Cases are grouped the way they are taught — five families for PLL, fifteen for
+OLL — because "I am slow at the fish shapes" is a sentence someone says and "I
+am slow at 9, 10, 35, 37" is not. `g` takes a whole family at once.
+
 In the drill, hold `space` until it turns green, release to start, and press it
 again when the cube is solved. The case is hidden while you work: recognising
 it is most of the skill. Press `p` to reveal it and its algorithm — that rep is

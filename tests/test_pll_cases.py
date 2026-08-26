@@ -16,6 +16,7 @@ import pytest
 from cubetrainer.cases import pll
 from cubetrainer.cases.pattern import (
     case_key,
+    cycle_structure,
     is_first_two_layers_solved,
     is_last_layer_oriented,
     is_pll_state,
@@ -190,10 +191,62 @@ def test_groups_have_their_canonical_sizes():
     assert sizes == {
         pll.EDGES_ONLY: 4,
         pll.CORNERS_ONLY: 3,
-        pll.ADJACENT_SWAP: 10,
+        pll.ADJACENT_SWAP: 6,
         pll.DIAGONAL_SWAP: 4,
+        pll.G_PERMS: 4,
     }
     assert sum(sizes.values()) == 21
+
+
+def _group_from_the_cube(case):
+    """Which family a case belongs to, read off the cube rather than the label.
+
+    Every reading here is taken at all four upper-face adjustments, because a
+    quarter turn of the top layer changes the permutation without changing the
+    case, and the family is a fact about the case.
+    """
+    base = Cube.solved().apply(case.setup)
+    views = [u_layer_permutation(base.apply(auf) if auf else base)
+             for auf in ("", "U", "U2", "U'")]
+    if any(corners == IDENTITY for corners, _ in views):
+        return pll.EDGES_ONLY
+    if any(edges == IDENTITY for _, edges in views):
+        return pll.CORNERS_ONLY
+    swaps = [corners for corners, edges in views
+             if cycle_structure(corners) == (2,) and cycle_structure(edges) == (2,)]
+    if not swaps:
+        # Nothing simply swaps: corners and edges each cycle in threes, which
+        # is what makes a G perm a G perm and why it is learned as one.
+        return pll.G_PERMS
+    kinds = set()
+    for corners in swaps:
+        moved = [i for i in range(4) if corners[i] != i]
+        kinds.add(pll.DIAGONAL_SWAP if (moved[1] - moved[0]) % 4 == 2
+                  else pll.ADJACENT_SWAP)
+    assert len(kinds) == 1, f"{case.id} swaps both ways: {kinds}"
+    return kinds.pop()
+
+
+@pytest.mark.parametrize("case", pll.PLL_CASES, ids=lambda c: c.id)
+def test_the_declared_group_is_the_one_the_cube_puts_the_case_in(case):
+    """The whole family scheme, checked against the cube. A case filed under
+    the wrong heading is a case a cuber will look for and not find."""
+    assert case.group == _group_from_the_cube(case)
+
+
+def test_the_g_perms_are_the_four_that_never_look_like_a_simple_swap():
+    """What separates them from the J and R perms, which do have an angle where
+    two corners and two edges simply trade places."""
+    assert sorted(c.id for c in pll.by_group()[pll.G_PERMS]) ==         ["Ga", "Gb", "Gc", "Gd"]
+    for case in pll.by_group()[pll.G_PERMS]:
+        base = Cube.solved().apply(case.setup)
+        threes = 0
+        for auf in ("", "U", "U2", "U'"):
+            corners, edges = u_layer_permutation(base.apply(auf) if auf else base)
+            assert not (cycle_structure(corners) == (2,)
+                        and cycle_structure(edges) == (2,)), case.id
+            threes += cycle_structure(corners) == (3,) == cycle_structure(edges)
+        assert threes, f"{case.id} never shows as a pair of three-cycles"
 
 
 def test_edge_only_cases_leave_every_corner_home():

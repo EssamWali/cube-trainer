@@ -13,12 +13,17 @@ from .catalogue import Case, Catalogue
 
 #: Groups as speedcubers learn them - by what the case does to the corners,
 #: because that is what you recognise first when you look down at the cube.
+#: Each is a fact about the permutation rather than a label, so the tests read
+#: the group off the cube instead of trusting what is written here.
 EDGES_ONLY = "Edges only"
 CORNERS_ONLY = "Corners only"
 ADJACENT_SWAP = "Adjacent corner swap"
 DIAGONAL_SWAP = "Diagonal corner swap"
+#: The four that no angle shows as a simple pair swap: corners and edges each
+#: cycle in threes, which is why they are learned as their own family.
+G_PERMS = "G perms"
 
-GROUP_ORDER = (EDGES_ONLY, CORNERS_ONLY, ADJACENT_SWAP, DIAGONAL_SWAP)
+GROUP_ORDER = (EDGES_ONLY, CORNERS_ONLY, ADJACENT_SWAP, DIAGONAL_SWAP, G_PERMS)
 
 
 PLL_CASES = (
@@ -63,16 +68,16 @@ PLL_CASES = (
     Case("Rb", "Rb perm", ADJACENT_SWAP,
          "R' U2 R U2 R' F R U R' U' R' F' R2 U'",
          "Mirror of Ra.", "Rb"),
-    Case("Ga", "Ga perm", ADJACENT_SWAP,
+    Case("Ga", "Ga perm", G_PERMS,
          "R2 U R' U R' U' R U' R2 U' D R' U R D'",
          "Corners and edges each cycle in threes.", "Gb"),
-    Case("Gb", "Gb perm", ADJACENT_SWAP,
+    Case("Gb", "Gb perm", G_PERMS,
          "R' U' R U D' R2 U R' U R U' R U' R2 D",
          "Undoes Ga.", "Ga"),
-    Case("Gc", "Gc perm", ADJACENT_SWAP,
+    Case("Gc", "Gc perm", G_PERMS,
          "R2 U' R U' R U R' U R2 U D' R U' R' D",
          "Corners and edges each cycle in threes, the other pairing.", "Gd"),
-    Case("Gd", "Gd perm", ADJACENT_SWAP,
+    Case("Gd", "Gd perm", G_PERMS,
          "R U R' U' D R2 U' R U' R' U R' U R2 D'",
          "Undoes Gc.", "Gc"),
 

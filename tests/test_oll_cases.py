@@ -148,13 +148,18 @@ def test_a_cube_with_the_first_two_layers_broken_is_not_an_oll_case():
 # --- the case data ----------------------------------------------------------
 
 def _edge_shape(flips):
-    """The group a state belongs to, read off the state rather than the label."""
+    """Which shape the oriented edges make, read off the state.
+
+    Not the same thing as the family a case is filed under -- a T and a C are
+    both lines -- but a family never mixes two of these, which is what makes it
+    checkable at all.
+    """
     upright = [i for i in range(4) if flips[i] == 0]
     if len(upright) == 4:
-        return oll.CROSS
+        return "cross"
     if not upright:
-        return oll.DOT
-    return oll.LINE if (upright[1] - upright[0]) % 4 == 2 else oll.L_SHAPE
+        return "dot"
+    return "line" if (upright[1] - upright[0]) % 4 == 2 else "L"
 
 
 def _setup_state(case):
@@ -219,38 +224,82 @@ def test_inverse_declarations_are_mutual():
         assert oll.get(case.inverse).inverse == case.id
 
 
-@pytest.mark.parametrize("case", oll.OLL_CASES, ids=lambda c: c.id)
-def test_the_declared_group_is_the_shape_the_state_actually_has(case):
-    """The group is checked against the edges, not against the name it was
-    given, because a miscounted group is the likeliest data-entry error."""
-    _, flips = u_layer_orientation(_setup_state(case))
-    assert case.group == _edge_shape(flips)
+def test_the_edge_shapes_fall_out_of_the_group_as_eight_fifteen_twenty_seven_seven():
+    """A fact about the cube rather than about the case list: of the 57
+    classes, 8 show no edge oriented, 15 a line, 27 an L and 7 the cross. The
+    shipped cases have to agree with that whatever they are filed under."""
+    from collections import Counter
+    predicted = Counter(_edge_shape(sorted(k)[0][1]) for k in UNSOLVED_CLASSES)
+    assert predicted == {"dot": 8, "line": 15, "L": 27, "cross": 7}
+    shipped = Counter(_edge_shape(u_layer_orientation(_setup_state(c))[1])
+                      for c in oll.OLL_CASES)
+    assert shipped == predicted
 
 
-def test_the_groups_have_the_sizes_the_cube_group_predicts():
-    """8, 15, 27 and 7 fall out of the enumeration above rather than out of a
-    list someone typed, so a case filed under the wrong shape shows up here."""
+def test_the_groups_have_the_sizes_cubers_learn_them_in():
     sizes = {group: len(cases) for group, cases in oll.by_group().items()}
-    assert sizes == {oll.DOT: 8, oll.LINE: 15, oll.L_SHAPE: 27, oll.CROSS: 7}
+    assert sizes == {
+        oll.ALL_EDGES: 7,
+        oll.ALL_CORNERS: 3,
+        oll.T_SHAPES: 2,
+        oll.W_SHAPES: 2,
+        oll.SQUARE_SHAPES: 2,
+        oll.P_SHAPES: 4,
+        oll.FISH_SHAPES: 4,
+        oll.C_SHAPES: 2,
+        oll.SMALL_LIGHTNING: 4,
+        oll.BIG_LIGHTNING: 2,
+        oll.SMALL_L: 6,
+        oll.KNIGHT_MOVE: 4,
+        oll.I_SHAPES: 4,
+        oll.AWKWARD: 4,
+        oll.NO_EDGES: 7,
+    }
     assert sum(sizes.values()) == 57
 
-    expected = {}
-    for klass in UNSOLVED_CLASSES:
-        _, flips = sorted(klass)[0]
-        expected[_edge_shape(flips)] = expected.get(_edge_shape(flips), 0) + 1
-    assert sizes == expected
+
+def test_every_case_is_filed_in_exactly_one_family():
+    filed = [case.id for cases in oll.by_group().values() for case in cases]
+    assert sorted(filed) == sorted(c.id for c in oll.OLL_CASES)
+    assert len(set(filed)) == 57
 
 
-def test_the_cross_group_is_the_one_with_every_edge_already_oriented():
-    for case in oll.by_group()[oll.CROSS]:
-        _, flips = u_layer_orientation(_setup_state(case))
-        assert flips == (0, 0, 0, 0), f"{case.id} still has an edge to flip"
+def test_the_group_called_all_edges_oriented_is_exactly_that():
+    """Three of the fifteen families are structural rather than pictorial, so
+    those three can be checked against the cube rather than taken on trust."""
+    named = {c.id for c in oll.by_group()[oll.ALL_EDGES]}
+    actual = {c.id for c in oll.OLL_CASES
+              if u_layer_orientation(_setup_state(c))[1] == (0, 0, 0, 0)}
+    assert named == actual
 
 
-def test_the_dot_group_is_the_one_with_no_edge_oriented():
-    for case in oll.by_group()[oll.DOT]:
+def test_the_group_called_all_corners_oriented_is_exactly_that():
+    named = {c.id for c in oll.by_group()[oll.ALL_CORNERS]}
+    actual = {c.id for c in oll.OLL_CASES
+              if u_layer_orientation(_setup_state(c))[0] == (0, 0, 0, 0)}
+    assert named == actual
+
+
+def test_no_edges_oriented_means_no_edge_is_oriented():
+    """The dot cases, less the one whose corners are all home already: that one
+    is filed by its corners, because that is what a cuber sees first."""
+    for case in oll.by_group()[oll.NO_EDGES]:
         _, flips = u_layer_orientation(_setup_state(case))
         assert flips == (1, 1, 1, 1), f"{case.id} already has an edge up"
+
+
+def test_no_family_mixes_two_different_edge_shapes():
+    """A shape family is a silhouette, which the cube cannot be asked about
+    directly -- but a family that mixed a line with an L would be a filing
+    error, and that it can be asked."""
+    for group, cases in oll.by_group().items():
+        if group == oll.ALL_CORNERS:
+            # The one family gathered by its corners; its members show a dot,
+            # a line and an L, and that is the point of it.
+            continue
+        shapes = {_edge_shape(u_layer_orientation(_setup_state(c))[1])
+                  for c in cases}
+        assert len(shapes) == 1, f"{group} mixes {sorted(shapes)}"
 
 
 @pytest.mark.parametrize("case", oll.OLL_CASES, ids=lambda c: c.id)

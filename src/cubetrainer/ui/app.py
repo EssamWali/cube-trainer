@@ -112,11 +112,15 @@ class PickerScreen(Screen):
     window instead -- twenty-one of them or fifty-seven.
     """
 
-    #: Tile sizes to try, largest first.
-    TILE_SIZES = (132, 108, 90, 76, 64, 54, 46)
-    TILE_GAP = 10
+    #: Tile widths to try, largest first.
+    TILE_SIZES = (150, 132, 118, 104, 92, 82, 74, 66, 58, 50, 44)
+    TILE_GAP = 8
+    #: Space between one family and the next along a band. Tight on purpose:
+    #: every pixel spent separating families is a pixel the pictures do not get,
+    #: and the group headings already separate them.
+    BLOCK_GAP = 18
     GRID_TOP = 86
-    GROUP_LABEL = 24
+    GROUP_LABEL = 22
     DETAIL_HEIGHT = 84
 
     def __init__(self, app, mode="select", catalogue=None):
@@ -137,27 +141,59 @@ class PickerScreen(Screen):
         self.states = {
             c.id: Cube.solved().apply(c.setup) for c in self.order
         }
-        self.tile, self.columns = self._layout()
+        self.tile, self.blocks = self._layout()
 
     def _layout(self):
-        """The largest tile size that fits every group above the detail panel.
-
-        Column count follows from the tile size rather than the other way
-        round, so a phase with fifty-seven cases lays out on the same rules as
-        one with twenty-one.
-        """
-        width = WINDOW[0] - 2 * MARGIN
+        """The largest tile size at which every family still fits on screen."""
         available = self.detail_top - self.GRID_TOP - 12
-        columns = 1
-        for size in self.TILE_SIZES:
-            columns = max(1, (width + self.TILE_GAP) // (size + self.TILE_GAP))
-            rows = sum(_rows_for(len(cases), columns)
-                       for cases in self.groups.values())
-            needed = (rows * (size + self.TILE_GAP)
-                      + len(self.groups) * self.GROUP_LABEL)
-            if needed <= available:
-                return size, columns
-        return self.TILE_SIZES[-1], columns
+        for tile in self.TILE_SIZES:
+            blocks, height = self._flow(tile)
+            if height <= available:
+                return tile, blocks
+        return self.TILE_SIZES[-1], self._flow(self.TILE_SIZES[-1])[0]
+
+    def _flow(self, tile):
+        """Place every family at this tile size, and say how tall it comes to.
+
+        Families are packed along a band and wrapped to the next, the way words
+        are. A family of two cases does not deserve a whole band of the window,
+        and at fifteen families there is not room to give it one anyway.
+        """
+        step_x = tile + self.TILE_GAP
+        step_y = tile + render.LABEL_STRIP + self.TILE_GAP
+        right = WINDOW[0] - MARGIN
+        columns = max(1, (WINDOW[0] - 2 * MARGIN + self.TILE_GAP) // step_x)
+        x, y, band = MARGIN, self.GRID_TOP, 0
+        blocks = []
+        for group in self.catalogue.group_order:
+            cases = self.groups[group]
+            across = min(len(cases), columns)
+            width = across * step_x - self.TILE_GAP
+            if x > MARGIN and x + width > right:
+                x, y, band = MARGIN, y + band + self.BLOCK_GAP, 0
+            placed = [
+                (case, pygame.Rect(x + column * step_x,
+                                   y + self.GROUP_LABEL + row * step_y,
+                                   tile, tile + render.LABEL_STRIP))
+                for index, case in enumerate(cases)
+                for row, column in [divmod(index, across)]
+            ]
+            blocks.append((group, (x, y), placed))
+            rows = _rows_for(len(cases), across)
+            band = max(band, self.GROUP_LABEL + rows * step_y - self.TILE_GAP)
+            x += width + self.BLOCK_GAP
+        return blocks, y + band - self.GRID_TOP
+
+    def tiles(self):
+        """Every case with the rectangle it is drawn in."""
+        for _, _, placed in self.blocks:
+            yield from placed
+
+    def rect_for(self, case):
+        for other, rect in self.tiles():
+            if other is case:
+                return rect
+        raise KeyError(case.id)
 
     @property
     def detail_top(self):
@@ -186,9 +222,9 @@ class PickerScreen(Screen):
         elif key in (pygame.K_LEFT, pygame.K_h):
             self.cursor = (self.cursor - 1) % len(self.order)
         elif key in (pygame.K_DOWN, pygame.K_j):
-            self.cursor = min(len(self.order) - 1, self.cursor + self.columns)
+            self._step_vertically(1)
         elif key in (pygame.K_UP, pygame.K_k):
-            self.cursor = max(0, self.cursor - self.columns)
+            self._step_vertically(-1)
         elif self.mode == "select":
             return self._handle_selection(key)
         return None
@@ -257,8 +293,8 @@ class PickerScreen(Screen):
             theme.text(surface, f"{len(self.selected)} of {len(self.order)} selected",
                        (WINDOW[0] - 40, 36), 20, ACCENT, right=True)
 
-        for group, label_top, placed in self.rows():
-            theme.text(surface, group.upper(), (MARGIN, label_top), 16, TEXT_DIM, True)
+        for group, (left, top), placed in self.blocks:
+            theme.text(surface, group.upper(), (left, top), 15, TEXT_DIM, True)
             for case, rect in placed:
                 position = self.order.index(case)
                 chosen = self.mode == "select" and case.id in self.selected
@@ -274,25 +310,24 @@ class PickerScreen(Screen):
         if self.prompt is not None:
             self._draw_prompt(surface)
 
-    def rows(self):
-        """Each group with its label position and where every case is drawn.
+    def _step_vertically(self, direction):
+        """Move to the nearest case above or below the cursor.
 
-        Laying the grid out separately from drawing it is what lets a test ask
-        whether all fifty-seven cases are actually on the screen.
+        The grid is not one rectangle -- families sit side by side and wrap --
+        so up and down are answered from where the tiles actually are rather
+        than by counting a fixed number of columns.
         """
-        top = self.GRID_TOP
-        step = self.tile + self.TILE_GAP
-        for group in self.catalogue.group_order:
-            cases = self.groups[group]
-            label_top, top = top, top + self.GROUP_LABEL
-            placed = [
-                (case, pygame.Rect(MARGIN + column * step, top + row * step,
-                                   self.tile, self.tile))
-                for index, case in enumerate(cases)
-                for row, column in [divmod(index, self.columns)]
-            ]
-            top += _rows_for(len(cases), self.columns) * step
-            yield group, label_top, placed
+        here = self.rect_for(self.current)
+        best = None
+        for case, rect in self.tiles():
+            offset = rect.centery - here.centery
+            if offset * direction <= 0:
+                continue
+            score = (abs(offset), abs(rect.centerx - here.centerx))
+            if best is None or score < best[0]:
+                best = (score, case)
+        if best is not None:
+            self.cursor = self.order.index(best[1])
 
     def label_for(self, case):
         """What goes under a thumbnail.
