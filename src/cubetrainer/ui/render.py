@@ -4,17 +4,25 @@ The picture is drawn from the cube state the trainer built, never from a stored
 image. A case picture and the scramble that produces it therefore cannot
 disagree: there is only one source for both.
 
-The layout is the one every last-layer diagram uses -- the upper face seen from
-above, ringed by the side stickers of the pieces in it, with arrows showing
-where each piece has to go.
+The layout is the one every last-layer diagram uses: the upper face seen from
+above, ringed by the side stickers of the pieces in it.
+
+How it is coloured follows from what the state is. A last layer already
+oriented is a permutation case, so it is drawn in true colours with arrows
+showing where each piece has to go. A last layer not yet oriented is an
+orientation case, so it is drawn in two tones -- facing up, or not -- and no
+arrows, because an arrow says where a piece has to travel and an orientation
+case is not about where anything travels. Both readings come from the same
+state, which is why the picture and the scramble cannot disagree.
 """
 
 import math
 
 import pygame
 
-from ..cases.pattern import u_layer_permutation
-from .theme import FACE_COLOURS, GRID_LINE, HIDDEN, TEXT_DIM, font
+from ..cases.pattern import CENTRE_U, is_last_layer_oriented, u_layer_permutation
+from .theme import (FACE_COLOURS, GRID_LINE, HIDDEN, ORIENTED, TEXT_DIM,
+                    UNORIENTED, font)
 
 # Slot positions on the 3x3 grid, as (row, column) with row 0 at the back.
 # Order matches CORNER_SLOTS and EDGE_SLOTS in cases.pattern.
@@ -31,33 +39,58 @@ SIDE_TABS = (
 )
 
 
+def _frame(rect):
+    """The square the upper face occupies, one cell's width, and the tab depth."""
+    size = min(rect.width, rect.height)
+    tab = size * 0.11
+    inner = pygame.Rect(0, 0, size - 2 * tab, size - 2 * tab)
+    inner.center = rect.center
+    return inner, inner.width / 3, tab
+
+
+def face_grid(rect):
+    """The nine upper-face cells, row by row from the back.
+
+    Where a sticker is drawn is worked out here rather than inside the drawing
+    loop, so a test can ask the diagram where it put something instead of
+    redoing the arithmetic and silently disagreeing with it.
+    """
+    inner, cell, _ = _frame(rect)
+    return [pygame.Rect(round(inner.left + column * cell),
+                        round(inner.top + row * cell),
+                        math.ceil(cell), math.ceil(cell))
+            for row in range(3) for column in range(3)]
+
+
 def draw_case(surface, cube, rect, arrows=True, hidden=False):
     """Draw the last layer of `cube` inside `rect`.
 
     With `hidden`, the shape is drawn blank. A drill that shows you the case has
     already answered the harder half of the question, so recognition is only
     trained when the picture stays covered until you ask for it.
+
+    `arrows` asks for permutation arrows where they mean something; an
+    orientation case never gets them.
     """
-    size = min(rect.width, rect.height)
-    tab = size * 0.11
-    inner = pygame.Rect(0, 0, size - 2 * tab, size - 2 * tab)
-    inner.center = rect.center
-    cell = inner.width / 3
+    two_tone = not is_last_layer_oriented(cube)
 
-    def cell_rect(row, column):
-        return pygame.Rect(
-            round(inner.left + column * cell), round(inner.top + row * cell),
-            math.ceil(cell), math.ceil(cell),
-        )
+    def sticker(index):
+        if hidden:
+            return HIDDEN
+        if two_tone:
+            up = cube.facelets[CENTRE_U]
+            return ORIENTED if cube.facelets[index] == up else UNORIENTED
+        return FACE_COLOURS[cube.facelets[index]]
 
-    for row in range(3):
-        for column in range(3):
-            colour = HIDDEN if hidden else FACE_COLOURS[cube.facelets[row * 3 + column]]
-            pygame.draw.rect(surface, colour, cell_rect(row, column))
-            pygame.draw.rect(surface, GRID_LINE, cell_rect(row, column), 2)
+    inner, cell, tab = _frame(rect)
+    cells = face_grid(rect)
+
+    for position, base in enumerate(cells):
+        pygame.draw.rect(surface, sticker(position), base)
+        pygame.draw.rect(surface, GRID_LINE, base, 2)
 
     for index, row, column, side in SIDE_TABS:
-        base = cell_rect(row, column)
+        base = cells[row * 3 + column]
         thickness = max(4, round(tab * 0.72))
         gap = max(2, round(tab * 0.18))
         if side == "top":
@@ -68,11 +101,10 @@ def draw_case(surface, cube, rect, arrows=True, hidden=False):
             area = pygame.Rect(base.left - thickness - gap, base.top, thickness, base.height)
         else:
             area = pygame.Rect(base.right + gap, base.top, thickness, base.height)
-        colour = HIDDEN if hidden else FACE_COLOURS[cube.facelets[index]]
-        pygame.draw.rect(surface, colour, area)
+        pygame.draw.rect(surface, sticker(index), area)
         pygame.draw.rect(surface, GRID_LINE, area, 1)
 
-    if arrows and not hidden:
+    if arrows and not hidden and not two_tone:
         _draw_permutation_arrows(surface, cube, inner, cell)
 
 

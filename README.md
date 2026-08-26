@@ -2,10 +2,10 @@
 
 Targeted scramble generation and timing for practising CFOP on a physical 3x3.
 
-Pick the PLL cases you want to work on. The trainer hands you a scramble that
-leaves a solved cube showing exactly one of them, hides which one it is, and
-times you WCA-style while you recognise and solve it. It records every rep, so
-it can tell you which cases you are actually slow at rather than which
+Pick the PLL or OLL cases you want to work on. The trainer hands you a scramble
+that leaves a solved cube showing exactly one of them, hides which one it is,
+and times you WCA-style while you recognise and solve it. It records every rep,
+so it can tell you which cases you are actually slow at rather than which
 algorithms happen to be long.
 
 The cube stays in your hands. The application never sees it.
@@ -28,7 +28,10 @@ cube-trainer practice.sqlite3
 
 ## Using it
 
-**Drill PLL** — choose cases, then drill them.
+**Drill PLL** and **Drill OLL** — choose cases, then drill them. It is the same
+screen and the same keys for both, because it is the same drill; only the cases
+differ. A case set you save belongs to the phase you saved it in, so "hard" can
+mean one thing in PLL and another in OLL.
 
 | key | |
 | --- | --- |
@@ -48,13 +51,17 @@ Press `d` if you fumble. Every scramble assumes you are starting from a solved
 cube, and a misexecuted algorithm leaves the cube somewhere the trainer cannot
 follow, so the rep is logged as a DNF and you solve your cube before continuing.
 
-**Algorithm library** — the same grid, browsable, with each case's algorithm.
+**Algorithm library** — the same grid, browsable, with each case's algorithm,
+one entry per phase.
 
 **Statistics** — every drilled case, ranked. Weakness is shown as five separate
 numbers rather than one score, because a case can be slow, erratic, still being
 looked up, or dropped often, and those need different practice. `tab` changes
 which one the ranking uses. The default is seconds per move: ranking by raw
 time mostly tells you which algorithms are long, which you already knew.
+
+One phase at a time, with the arrow keys to switch. An OLL case and a PLL case
+in the same ranking would be two incomparable things in one list.
 
 ## How it works
 
@@ -66,11 +73,18 @@ The move engine is derived geometrically in 3D rather than written as tables of
 facelet indices, so face turns, slices, wide moves and rotations all come from
 one definition. It is cross-checked against `kociemba`, an unrelated solver.
 
+The picture follows from the state rather than from a stored image, which is
+also what decides how it is drawn. A last layer already oriented is a
+permutation case, so it is drawn in true colours with arrows saying where each
+piece has to go. A last layer not yet oriented is an orientation case, so it is
+drawn in the two tones that question has answers, and no arrows — an arrow says
+where a piece travels, which is a wrong answer about an OLL case.
+
 The case data is not checked against its own algorithms, which would be
 circular. It is checked against the cube group: the tests enumerate all 21
-last-layer permutation classes and require the shipped cases to cover them
-exactly once. See [docs/adr](docs/adr) for that and for why this is a desktop
-application rather than a web page.
+last-layer permutation classes, and all 57 orientation classes, and require the
+shipped cases to cover them exactly once. See [docs/adr](docs/adr) for that and
+for why this is a desktop application rather than a web page.
 
 ## Tests
 
@@ -81,6 +95,6 @@ pytest
 
 ## Not built yet
 
-OLL, full-solve timing with phase splits, and cross drills. The domain layer
+Full-solve timing with phase splits, and cross drills. The domain layer
 already carries them — the timer takes any number of phases, the store records
-splits as their own rows — but the screens are PLL only for now.
+splits as their own rows — but the screens drill cases and nothing else for now.

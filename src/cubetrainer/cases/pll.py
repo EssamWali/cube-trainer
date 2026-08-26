@@ -9,9 +9,7 @@ The setup a drill hands out is the inverse of the algorithm, so a cuber who
 applies the scramble to a solved cube is left holding exactly this case.
 """
 
-from dataclasses import dataclass
-
-from ..cube.notation import derotate, format_sequence, invert
+from .catalogue import Case, Catalogue
 
 #: Groups as speedcubers learn them - by what the case does to the corners,
 #: because that is what you recognise first when you look down at the cube.
@@ -21,37 +19,6 @@ ADJACENT_SWAP = "Adjacent corner swap"
 DIAGONAL_SWAP = "Diagonal corner swap"
 
 GROUP_ORDER = (EDGES_ONLY, CORNERS_ONLY, ADJACENT_SWAP, DIAGONAL_SWAP)
-
-
-@dataclass(frozen=True)
-class Case:
-    """One last-layer case."""
-
-    id: str
-    name: str
-    group: str
-    #: Written so the cube ends in the orientation it started in. Some published
-    #: algorithms include a regrip and never turn back; left that way they are
-    #: ambiguous as data, because the case they solve depends on how you were
-    #: holding the cube when you finished.
-    algorithm: str
-    description: str
-    #: id of the case that undoes this one; equal to `id` when self-inverse.
-    inverse: str
-
-    @property
-    def setup(self):
-        """The sequence that takes a solved cube to this case.
-
-        Rewritten without whole-cube rotations, so applying a scramble never
-        leaves the cuber holding the cube differently from how they picked it
-        up, and the last layer is always the layer on top.
-        """
-        return format_sequence(derotate(invert(self.algorithm)))
-
-    @property
-    def is_self_inverse(self):
-        return self.inverse == self.id
 
 
 PLL_CASES = (
@@ -123,20 +90,15 @@ PLL_CASES = (
          "Mirror of Na.", "Nb"),
 )
 
-BY_ID = {case.id: case for case in PLL_CASES}
+#: The PLL phase, as the screens see it.
+CATALOGUE = Catalogue("PLL", PLL_CASES, GROUP_ORDER)
 
 
 def get(case_id):
     """Look a case up by id, e.g. ``get("T")``."""
-    try:
-        return BY_ID[case_id]
-    except KeyError:
-        raise KeyError(f"no PLL case named {case_id!r}") from None
+    return CATALOGUE.get(case_id)
 
 
 def by_group():
     """Cases arranged into the groups the picker displays."""
-    return {
-        group: tuple(c for c in PLL_CASES if c.group == group)
-        for group in GROUP_ORDER
-    }
+    return CATALOGUE.by_group()

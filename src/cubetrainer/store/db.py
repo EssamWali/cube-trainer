@@ -102,18 +102,28 @@ class Store:
         return solve_id
 
     # -- reading ----------------------------------------------------------
-    def reps(self, case_id=None, session_id=None):
-        sql = "SELECT * FROM rep"
+    def reps(self, case_id=None, session_id=None, phase=None):
+        """Stored reps, oldest first.
+
+        A rep records which case it was and not which phase, because the
+        session it belongs to already knows. Recovering the phase by joining
+        beats writing the same fact down twice and letting the two disagree.
+        """
+        sql = "SELECT rep.* FROM rep"
         clauses, params = [], []
+        if phase is not None:
+            sql += " JOIN session ON session.id = rep.session_id"
+            clauses.append("session.phase = ?")
+            params.append(phase)
         if case_id is not None:
-            clauses.append("case_id = ?")
+            clauses.append("rep.case_id = ?")
             params.append(case_id)
         if session_id is not None:
-            clauses.append("session_id = ?")
+            clauses.append("rep.session_id = ?")
             params.append(session_id)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY id"
+        sql += " ORDER BY rep.id"
         return [dict(r) for r in self.connection.execute(sql, params)]
 
     def solves(self, session_id=None):
@@ -136,11 +146,16 @@ class Store:
         sql += " ORDER BY phase_split.solve_id, phase_split.ordinal"
         return [dict(r) for r in self.connection.execute(sql, params)]
 
-    def practised_case_ids(self):
-        rows = self.connection.execute(
-            "SELECT DISTINCT case_id FROM rep ORDER BY case_id"
-        )
-        return [r["case_id"] for r in rows]
+    def practised_case_ids(self, phase=None):
+        """Every case that has ever been drilled, optionally in one phase."""
+        sql = "SELECT DISTINCT rep.case_id FROM rep"
+        params = []
+        if phase is not None:
+            sql += (" JOIN session ON session.id = rep.session_id"
+                    " WHERE session.phase = ?")
+            params.append(phase)
+        sql += " ORDER BY rep.case_id"
+        return [r["case_id"] for r in self.connection.execute(sql, params)]
 
     # -- case sets --------------------------------------------------------
     def save_case_set(self, name, phase, case_ids):

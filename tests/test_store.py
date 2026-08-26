@@ -238,3 +238,46 @@ def test_solve_summary_reports_wca_averages(store):
     assert summary["best"] == pytest.approx(18.0)
     assert summary["ao5"] == pytest.approx(20.0)
     assert summary["ao12"] is None
+
+
+# --- a rep's phase comes from its session -----------------------------------
+
+def test_reps_can_be_read_back_one_phase_at_a_time(store):
+    """A rep records its case and not its phase, because the session it belongs
+    to already knows. Recovering it by joining beats storing it twice and
+    letting the two disagree."""
+    pll_session = store.start_session("drill", "PLL")
+    oll_session = store.start_session("drill", "OLL")
+    store.record_rep(pll_session, "T", "R U", 2.0)
+    store.record_rep(oll_session, "OLL 27", "R U", 3.0)
+
+    assert [r["case_id"] for r in store.reps(phase="PLL")] == ["T"]
+    assert [r["case_id"] for r in store.reps(phase="OLL")] == ["OLL 27"]
+    assert len(store.reps()) == 2
+
+
+def test_a_rep_keeps_every_column_when_read_back_by_phase(store):
+    session = store.start_session("drill", "OLL")
+    store.record_rep(session, "OLL 27", "R U R'", 1.5, peeked=True)
+    rep, = store.reps(phase="OLL")
+    assert rep["scramble"] == "R U R'"
+    assert rep["duration_ms"] == 1500
+    assert rep["peeked"] == 1
+
+
+def test_practised_cases_can_be_asked_for_by_phase(store):
+    pll_session = store.start_session("drill", "PLL")
+    oll_session = store.start_session("drill", "OLL")
+    store.record_rep(pll_session, "T", "R U", 2.0)
+    store.record_rep(oll_session, "OLL 27", "R U", 3.0)
+    store.record_rep(oll_session, "OLL 21", "R U", 4.0)
+
+    assert store.practised_case_ids("PLL") == ["T"]
+    assert store.practised_case_ids("OLL") == ["OLL 21", "OLL 27"]
+    assert store.practised_case_ids() == ["OLL 21", "OLL 27", "T"]
+
+
+def test_a_phase_nobody_has_drilled_has_no_practised_cases(store):
+    session = store.start_session("drill", "PLL")
+    store.record_rep(session, "T", "R U", 2.0)
+    assert store.practised_case_ids("OLL") == []

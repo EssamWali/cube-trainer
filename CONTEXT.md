@@ -42,7 +42,13 @@ A configuration a phase can present, identified by name — `T perm`, `OLL 21`.
 There are 21 PLL cases and 57 OLL cases.
 
 **Case Set**:
-A named group of cases a cuber has chosen to work on.
+A named group of cases a cuber has chosen to work on. Belongs to one phase, so
+two phases can each have a set of the same name.
+
+**Catalogue**:
+Every case of one phase, together with the phase's name and the order its
+groups are shown in. What a screen is handed instead of a case list, so that
+adding a phase is data rather than a change to every screen.
 
 **Algorithm**:
 A sequence that solves one case and leaves the cube held as it was picked up. A

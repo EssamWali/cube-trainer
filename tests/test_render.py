@@ -1,0 +1,151 @@
+"""Drawing a case.
+
+A picture that disagrees with the scramble beside it is worse than no picture,
+so everything drawn here is read out of the cube state the trainer built. These
+tests read the pixels back and check what a cuber would actually be looking at.
+"""
+
+import pygame
+import pytest
+
+from cubetrainer.cases import oll, pll
+from cubetrainer.cube import Cube
+from cubetrainer.ui import render
+from cubetrainer.ui.theme import FACE_COLOURS, HIDDEN, ORIENTED, UNORIENTED
+
+RECT = pygame.Rect(0, 0, 240, 240)
+TWO_TONES = {ORIENTED, UNORIENTED}
+
+
+@pytest.fixture(autouse=True)
+def _pygame():
+    pygame.init()
+    yield
+    pygame.quit()
+
+
+def _state(case):
+    return Cube.solved().apply(case.setup)
+
+
+def _drawn(cube, **kwargs):
+    """Every colour the diagram puts on screen, sampled from the picture."""
+    surface = pygame.Surface((260, 260))
+    surface.fill((1, 2, 3))
+    render.draw_case(surface, cube, RECT, **kwargs)
+    return {surface.get_at((x, y))[:3]
+            for x in range(RECT.width) for y in range(RECT.height)}
+
+
+def _top_face(cube, **kwargs):
+    """The nine upper-face cells, sampled at their centres.
+
+    The diagram is asked where it drew them rather than told, so changing the
+    proportions cannot leave this quietly reading the wrong pixels.
+    """
+    surface = pygame.Surface((260, 260))
+    render.draw_case(surface, cube, RECT, **kwargs)
+    return [surface.get_at(cell.center)[:3] for cell in render.face_grid(RECT)]
+
+
+# --- orientation cases ------------------------------------------------------
+
+def test_an_orientation_case_is_drawn_in_two_tones():
+    """An OLL diagram answers one question -- is this sticker facing up -- so
+    it is drawn in the two colours that question has answers."""
+    drawn = _drawn(_state(oll.get("OLL 27")))
+    assert drawn <= TWO_TONES | {(1, 2, 3), render.GRID_LINE}
+    assert TWO_TONES <= drawn
+
+
+def test_a_sticker_showing_the_upper_face_colour_is_the_oriented_tone():
+    sune = _top_face(_state(oll.get("OLL 27")))
+    solved = _top_face(Cube.solved().apply("R U R' U R U2 R' U2"))
+    assert sune[4] == ORIENTED, "the centre always shows the upper-face colour"
+    assert UNORIENTED in sune, "sune has corners still to orient"
+    assert set(solved) == {ORIENTED} or UNORIENTED in solved
+
+
+def test_the_cross_group_shows_every_edge_oriented():
+    """The plus sign a cuber looks for, drawn as such."""
+    cells = _top_face(_state(oll.get("OLL 27")))
+    for edge in (1, 3, 5, 7):
+        assert cells[edge] == ORIENTED
+    assert cells[4] == ORIENTED
+
+
+def test_the_dot_group_shows_only_the_centre_oriented():
+    for case in oll.by_group()[oll.DOT]:
+        cells = _top_face(_state(case))
+        for edge in (1, 3, 5, 7):
+            assert cells[edge] == UNORIENTED, case.id
+
+
+def test_side_stickers_tell_two_cases_with_the_same_top_apart():
+    """Seen from directly above, several OLL cases are the same picture. The
+    ring of side stickers is the only thing that separates them, so it has to
+    be drawn and it has to be read from the state."""
+    def picture(case):
+        surface = pygame.Surface((260, 260))
+        render.draw_case(surface, _state(case), RECT)
+        return pygame.image.tostring(surface, "RGB")
+
+    by_top = {}
+    for case in oll.OLL_CASES:
+        by_top.setdefault(tuple(_top_face(_state(case))), []).append(case)
+    shared = [cases for cases in by_top.values() if len(cases) > 1]
+    assert shared, "no two cases share a top face, so nothing is being tested"
+    for cases in shared:
+        pictures = {picture(case) for case in cases}
+        assert len(pictures) == len(cases),             f"{[c.id for c in cases]} are drawn identically"
+
+
+def test_no_permutation_arrows_are_drawn_for_an_orientation_case():
+    """An arrow says where a piece has to travel. That is a true sentence about
+    a permutation case and a wrong answer about an orientation one."""
+    drawn = []
+    original = render._draw_arrow
+    render._draw_arrow = lambda *a, **k: drawn.append(a)
+    try:
+        for case in oll.OLL_CASES:
+            render.draw_case(pygame.Surface((260, 260)), _state(case), RECT)
+        assert drawn == []
+    finally:
+        render._draw_arrow = original
+
+
+def test_hidden_blanks_an_orientation_case():
+    assert _drawn(_state(oll.get("OLL 27")), hidden=True) <= {
+        HIDDEN, (1, 2, 3), render.GRID_LINE}
+
+
+def test_every_orientation_case_draws_as_a_thumbnail():
+    surface = pygame.Surface((1180, 780))
+    for index, case in enumerate(oll.OLL_CASES):
+        rect = pygame.Rect((index % 8) * 140, (index // 8) * 140, 132, 132)
+        render.draw_thumbnail(surface, _state(case), rect, case.id)
+
+
+# --- permutation cases are unchanged ----------------------------------------
+
+def test_a_permutation_case_keeps_its_true_colours():
+    drawn = _drawn(_state(pll.get("T")))
+    assert FACE_COLOURS["F"] in drawn
+    assert FACE_COLOURS["R"] in drawn
+    assert len(drawn & set(FACE_COLOURS.values())) >= 4
+
+
+def test_a_permutation_case_still_draws_its_arrows():
+    drawn = []
+    original = render._draw_arrow
+    render._draw_arrow = lambda *a, **k: drawn.append(a)
+    try:
+        render.draw_case(pygame.Surface((260, 260)), _state(pll.get("T")), RECT)
+        assert drawn, "the T perm moves pieces, so something has to point at them"
+    finally:
+        render._draw_arrow = original
+
+
+def test_hidden_blanks_a_permutation_case():
+    assert _drawn(_state(pll.get("T")), hidden=True) <= {
+        HIDDEN, (1, 2, 3), render.GRID_LINE}

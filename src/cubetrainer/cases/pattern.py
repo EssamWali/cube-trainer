@@ -10,10 +10,15 @@ from ..cube.state import CENTRES, Cube
 CENTRE_U = CENTRES["U"]
 
 #: Facelet indices of each U-layer corner slot, going clockwise from back-left.
+#: Within a slot the upper-face sticker comes first, then the two side stickers
+#: in clockwise order seen from above. That ordering is what makes a twist a
+#: number rather than a description: the U-coloured sticker sits at index 0, 1
+#: or 2, and the count means the same thing in every slot.
 CORNER_SLOTS = ((0, 36, 47), (2, 45, 11), (8, 9, 20), (6, 18, 38))
 CORNER_SLOT_NAMES = ("UBL", "UBR", "UFR", "UFL")
 
-#: Facelet indices of each U-layer edge slot, going clockwise from back.
+#: Facelet indices of each U-layer edge slot, going clockwise from back. Upper
+#: face first here too, so a flipped edge reads as 1.
 EDGE_SLOTS = ((1, 46), (5, 10), (7, 19), (3, 37))
 EDGE_SLOT_NAMES = ("UB", "UR", "UF", "UL")
 
@@ -66,6 +71,44 @@ def u_layer_permutation(cube):
     return tuple(corners), tuple(edges)
 
 
+def u_layer_orientation(cube):
+    """How each U-layer piece is turned.
+
+    Returns ``(twists, flips)``. ``twists[i]`` is where the upper-face colour
+    sits on the corner in slot ``i`` -- 0 on top, 1 or 2 a third of a turn
+    round -- and ``flips[i]`` is 1 when the edge there shows its upper-face
+    colour on the side instead of the top.
+
+    This is orientation only. Which piece is in which slot is the permutation
+    reading's question, and answering both at once would make two cases that
+    OLL treats as one compare unequal.
+    """
+    if not is_canonically_oriented(cube):
+        raise ValueError(
+            "the last layer is not on top; derotate the sequence first"
+        )
+    face_of = cube.orientation()
+
+    def turned(slot, kind):
+        faces = [face_of[cube.facelets[i]] for i in slot]
+        if "U" not in faces:
+            raise ValueError(f"slot {slot} does not hold a U-layer {kind}")
+        return faces.index("U")
+
+    return (tuple(turned(slot, "corner") for slot in CORNER_SLOTS),
+            tuple(turned(slot, "edge") for slot in EDGE_SLOTS))
+
+
+def orientation_key(cube):
+    """A value equal for two states iff they are the same orientation case.
+
+    The counterpart of `case_key`, read from the same sixteen angles, so the
+    answer survives both an upper-face adjustment and a cuber who turned the
+    whole cube round before looking.
+    """
+    return min(u_layer_orientation(cube.apply(view)) for view in _VIEWS)
+
+
 def is_last_layer_oriented(cube):
     """True when every U-layer sticker on top shows the U colour."""
     up = cube.facelets[4]
@@ -97,12 +140,24 @@ def is_pll_state(cube):
             and is_last_layer_oriented(cube))
 
 
-def case_key(cube):
-    """A value equal for two states iff they are the same case.
+def is_oll_state(cube):
+    """True when the first two layers are done and the last layer is not.
 
-    Built by looking at the state from all sixteen equivalent angles and taking
-    the smallest reading, so the answer does not depend on how the cube happens
-    to be held or on where the U layer happens to be turned to.
+    The precondition for a state to be an OLL case: something is left to
+    orient. A solved last layer is not the fifty-eighth case, it is finished.
+    """
+    return (is_canonically_oriented(cube)
+            and is_first_two_layers_solved(cube)
+            and not is_last_layer_oriented(cube))
+
+
+def case_key(cube):
+    """A value equal for two states iff they are the same permutation case.
+
+    The permutation reading's answer, as `orientation_key` is the orientation
+    reading's. Built by looking at the state from all sixteen equivalent angles
+    and taking the smallest reading, so the answer does not depend on how the
+    cube happens to be held or on where the U layer happens to be turned to.
     """
     return min(u_layer_permutation(cube.apply(view)) for view in _VIEWS)
 

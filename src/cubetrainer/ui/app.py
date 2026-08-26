@@ -10,7 +10,7 @@ import sys
 
 import pygame
 
-from ..cases import pll
+from ..cases import CATALOGUES
 from ..cube import Cube
 from ..cube.notation import move_count
 from ..store import Store
@@ -25,10 +25,18 @@ WINDOW = (1180, 780)
 FPS = 60
 LAST_USED = "__last used__"
 
+MARGIN = 40
+HELP_LINE = WINDOW[1] - 30
+
 
 def algorithm_for(case, overrides):
     """A cuber's own algorithm for a case, or the shipped default."""
     return overrides.get(case.id, case.algorithm)
+
+
+def _rows_for(count, columns):
+    """How many rows `count` tiles take at `columns` across."""
+    return -(-count // columns)
 
 
 class Screen:
@@ -50,11 +58,14 @@ class HomeScreen(Screen):
     def __init__(self, app):
         self.app = app
         self.cursor = 0
-        self.items = [
-            ("Drill PLL", lambda: PickerScreen(self.app, mode="select")),
-            ("Algorithm library", lambda: PickerScreen(self.app, mode="browse")),
-            ("Statistics", lambda: StatsScreen(self.app)),
-        ]
+
+        def picker(catalogue, mode):
+            return lambda: PickerScreen(self.app, mode=mode, catalogue=catalogue)
+
+        self.items = [(f"Drill {c.phase}", picker(c, "select")) for c in app.catalogues]
+        self.items += [(f"{c.phase} algorithm library", picker(c, "browse"))
+                       for c in app.catalogues]
+        self.items.append(("Statistics", lambda: StatsScreen(self.app)))
 
     def handle(self, event):
         if event.type != pygame.KEYDOWN:
@@ -65,7 +76,7 @@ class HomeScreen(Screen):
             self.cursor = (self.cursor - 1) % len(self.items)
         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
             return self.items[self.cursor][1]()
-        elif event.key in (pygame.K_1, pygame.K_2, pygame.K_3):
+        elif pygame.K_1 <= event.key <= pygame.K_9:
             index = event.key - pygame.K_1
             if index < len(self.items):
                 self.cursor = index
@@ -95,24 +106,68 @@ class PickerScreen(Screen):
 
     Cases are grouped the way cubers talk about them. "I am bad at the diagonal
     corner swaps" is a sentence someone says; "I am bad at V, Y, Na, Nb" is not.
+
+    Every case of the phase is on screen at once. Scrolling a grid of case
+    pictures means hunting for the one you want, so the tiles shrink to fit the
+    window instead -- twenty-one of them or fifty-seven.
     """
 
-    COLUMNS = 7
+    #: Tile sizes to try, largest first.
+    TILE_SIZES = (132, 108, 90, 76, 64, 54, 46)
+    TILE_GAP = 10
+    GRID_TOP = 86
+    GROUP_LABEL = 24
+    DETAIL_HEIGHT = 84
 
-    def __init__(self, app, mode="select"):
+    def __init__(self, app, mode="select", catalogue=None):
         self.app = app
         self.mode = mode
-        self.groups = pll.by_group()
-        self.order = [c for group in pll.GROUP_ORDER for c in self.groups[group]]
+        # No catalogue means the first phase the application offers, which is
+        # what a screen opened without one has always meant.
+        self.catalogue = catalogue or app.catalogues[0]
+        self.groups = self.catalogue.by_group()
+        self.order = list(self.catalogue.order)
         self.cursor = 0
         self.prompt = None
         self.prompt_text = ""
         self.message = None
-        restored = app.store.load_case_set(LAST_USED, "PLL") if mode == "select" else None
+        restored = (app.store.load_case_set(LAST_USED, self.phase)
+                    if mode == "select" else None)
         self.selected = set(restored or [c.id for c in self.order])
         self.states = {
             c.id: Cube.solved().apply(c.setup) for c in self.order
         }
+        self.tile, self.columns = self._layout()
+
+    def _layout(self):
+        """The largest tile size that fits every group above the detail panel.
+
+        Column count follows from the tile size rather than the other way
+        round, so a phase with fifty-seven cases lays out on the same rules as
+        one with twenty-one.
+        """
+        width = WINDOW[0] - 2 * MARGIN
+        available = self.detail_top - self.GRID_TOP - 12
+        columns = 1
+        for size in self.TILE_SIZES:
+            columns = max(1, (width + self.TILE_GAP) // (size + self.TILE_GAP))
+            rows = sum(_rows_for(len(cases), columns)
+                       for cases in self.groups.values())
+            needed = (rows * (size + self.TILE_GAP)
+                      + len(self.groups) * self.GROUP_LABEL)
+            if needed <= available:
+                return size, columns
+        return self.TILE_SIZES[-1], columns
+
+    @property
+    def detail_top(self):
+        """The detail panel is pinned above the help line rather than floating
+        below the grid, so it cannot be pushed off the bottom by a long phase."""
+        return HELP_LINE - 18 - self.DETAIL_HEIGHT
+
+    @property
+    def phase(self):
+        return self.catalogue.phase
 
     @property
     def current(self):
@@ -131,9 +186,9 @@ class PickerScreen(Screen):
         elif key in (pygame.K_LEFT, pygame.K_h):
             self.cursor = (self.cursor - 1) % len(self.order)
         elif key in (pygame.K_DOWN, pygame.K_j):
-            self.cursor = min(len(self.order) - 1, self.cursor + self.COLUMNS)
+            self.cursor = min(len(self.order) - 1, self.cursor + self.columns)
         elif key in (pygame.K_UP, pygame.K_k):
-            self.cursor = max(0, self.cursor - self.COLUMNS)
+            self.cursor = max(0, self.cursor - self.columns)
         elif self.mode == "select":
             return self._handle_selection(key)
         return None
@@ -155,7 +210,7 @@ class PickerScreen(Screen):
         elif key == pygame.K_s:
             self.prompt, self.prompt_text = "save", ""
         elif key == pygame.K_o:
-            names = self.app.store.case_set_names("PLL")
+            names = self.app.store.case_set_names(self.phase)
             names = [n for n in names if n != LAST_USED]
             if names:
                 self.prompt, self.prompt_text = "load", ""
@@ -164,8 +219,8 @@ class PickerScreen(Screen):
                 self.message = "select at least one case"
                 return None
             chosen = [c.id for c in self.order if c.id in self.selected]
-            self.app.store.save_case_set(LAST_USED, "PLL", chosen)
-            return DrillScreen(self.app, chosen)
+            self.app.store.save_case_set(LAST_USED, self.phase, chosen)
+            return DrillScreen(self.app, chosen, self.catalogue)
         return None
 
     def _handle_prompt(self, event):
@@ -174,16 +229,18 @@ class PickerScreen(Screen):
         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             if self.prompt == "save" and self.prompt_text.strip():
                 chosen = [c.id for c in self.order if c.id in self.selected]
-                self.app.store.save_case_set(self.prompt_text.strip(), "PLL", chosen)
+                self.app.store.save_case_set(
+                    self.prompt_text.strip(), self.phase, chosen)
                 self.message = f"saved as {self.prompt_text.strip()!r}"
             self.prompt = None
         elif event.key == pygame.K_BACKSPACE:
             self.prompt_text = self.prompt_text[:-1]
         elif self.prompt == "load" and event.unicode.isdigit():
-            names = [n for n in self.app.store.case_set_names("PLL") if n != LAST_USED]
+            names = [n for n in self.app.store.case_set_names(self.phase)
+                     if n != LAST_USED]
             index = int(event.unicode) - 1
             if 0 <= index < len(names):
-                loaded = self.app.store.load_case_set(names[index], "PLL")
+                loaded = self.app.store.load_case_set(names[index], self.phase)
                 self.selected = set(loaded or [])
                 self.message = f"loaded {names[index]!r}"
                 self.prompt = None
@@ -193,39 +250,66 @@ class PickerScreen(Screen):
 
     def draw(self, surface):
         surface.fill(BACKGROUND)
-        title = "Choose cases to drill" if self.mode == "select" else "Algorithm library"
+        title = (f"Choose {self.phase} cases to drill" if self.mode == "select"
+                 else f"{self.phase} algorithm library")
         theme.text(surface, title, (40, 28), 30, TEXT, True)
         if self.mode == "select":
             theme.text(surface, f"{len(self.selected)} of {len(self.order)} selected",
                        (WINDOW[0] - 40, 36), 20, ACCENT, right=True)
 
-        top = 86
-        left = 40
-        width, height = 132, 132
-        for group in pll.GROUP_ORDER:
-            cases = self.groups[group]
-            theme.text(surface, group.upper(), (left, top), 16, TEXT_DIM, True)
-            top += 24
-            for index, case in enumerate(cases):
-                rect = pygame.Rect(left + index * (width + 10), top, width, height)
+        marker = max(4, self.tile // 22)
+        for group, label_top, placed in self.rows():
+            theme.text(surface, group.upper(), (MARGIN, label_top), 16, TEXT_DIM, True)
+            for case, rect in placed:
                 position = self.order.index(case)
                 render.draw_thumbnail(
-                    surface, self.states[case.id], rect, case.id,
+                    surface, self.states[case.id], rect, self.label_for(case),
                     selected=(position == self.cursor),
                     dim=(self.mode == "select" and case.id not in self.selected),
                 )
                 if self.mode == "select" and case.id in self.selected:
-                    pygame.draw.circle(surface, READY, (rect.right - 12, rect.top + 12), 5)
-            top += height + 18
+                    pygame.draw.circle(surface, READY,
+                                       (rect.right - 2 * marker, rect.top + 2 * marker),
+                                       marker)
 
-        self._draw_detail(surface, top)
+        self._draw_detail(surface, self.detail_top)
         self._draw_help(surface)
         if self.prompt is not None:
             self._draw_prompt(surface)
 
+    def rows(self):
+        """Each group with its label position and where every case is drawn.
+
+        Laying the grid out separately from drawing it is what lets a test ask
+        whether all fifty-seven cases are actually on the screen.
+        """
+        top = self.GRID_TOP
+        step = self.tile + self.TILE_GAP
+        for group in self.catalogue.group_order:
+            cases = self.groups[group]
+            label_top, top = top, top + self.GROUP_LABEL
+            placed = [
+                (case, pygame.Rect(MARGIN + column * step, top + row * step,
+                                   self.tile, self.tile))
+                for index, case in enumerate(cases)
+                for row, column in [divmod(index, self.columns)]
+            ]
+            top += _rows_for(len(cases), self.columns) * step
+            yield group, label_top, placed
+
+    def label_for(self, case):
+        """What goes under a thumbnail.
+
+        The id already names the phase, and the phase is in the title, so
+        repeating it under every one of fifty-seven tiles only costs room the
+        picture needs.
+        """
+        prefix = self.phase + " "
+        return case.id[len(prefix):] if case.id.startswith(prefix) else case.id
+
     def _draw_detail(self, surface, top):
         case = self.current
-        panel = pygame.Rect(40, top, WINDOW[0] - 80, 84)
+        panel = pygame.Rect(MARGIN, top, WINDOW[0] - 2 * MARGIN, self.DETAIL_HEIGHT)
         pygame.draw.rect(surface, PANEL, panel, border_radius=8)
         theme.text(surface, case.name, (panel.left + 16, panel.top + 12), 24, TEXT, True)
         theme.text(surface, case.description, (panel.left + 16, panel.top + 44), 17, TEXT_DIM)
@@ -256,7 +340,8 @@ class PickerScreen(Screen):
             theme.text(surface, self.prompt_text + "_", (box.centerx, box.top + 80), 26, ACCENT, centre=True)
             theme.text(surface, "enter to save, esc to cancel", (box.centerx, box.bottom - 40), 16, TEXT_DIM, centre=True)
         else:
-            names = [n for n in self.app.store.case_set_names("PLL") if n != LAST_USED]
+            names = [n for n in self.app.store.case_set_names(self.phase)
+                     if n != LAST_USED]
             theme.text(surface, "Open a case set", (box.centerx, box.top + 20), 24, TEXT, True, centre=True)
             for index, name in enumerate(names[:9]):
                 theme.text(surface, f"{index + 1}. {name}", (box.centerx, box.top + 66 + index * 26),
@@ -273,11 +358,12 @@ class DrillScreen(Screen):
     screen trains only the half that was already easy.
     """
 
-    def __init__(self, app, case_ids):
+    def __init__(self, app, case_ids, catalogue=None):
         self.app = app
+        self.catalogue = catalogue or app.catalogues[0]
         self.case_ids = list(case_ids)
         self.sampler = RoundRobinSampler(self.case_ids, app.rng)
-        self.session = app.store.start_session("drill", "PLL")
+        self.session = app.store.start_session("drill", self.catalogue.phase)
         self.timer = SolveTimer()
         self.stage = "scramble"
         self.peeked = False
@@ -291,7 +377,7 @@ class DrillScreen(Screen):
         self._next_case()
 
     def _next_case(self):
-        self.case = pll.get(self.sampler.next())
+        self.case = self.catalogue.get(self.sampler.next())
         self.scramble = scramble_for(self.case, self.app.rng)
         self.state = Cube.solved().apply(self.scramble)
         self.timer.reset()
@@ -376,7 +462,8 @@ class DrillScreen(Screen):
     def draw(self, surface):
         surface.fill(BACKGROUND)
         running = self.timer.state is TimerState.RUNNING
-        theme.text(surface, f"PLL drill   {len(self.case_ids)} cases", (40, 28), 20, TEXT_DIM)
+        theme.text(surface, f"{self.catalogue.phase} drill   {len(self.case_ids)} cases",
+                   (40, 28), 20, TEXT_DIM)
         self._draw_session_line(surface)
 
         if not running:
@@ -456,6 +543,10 @@ class StatsScreen(Screen):
 
     A case can be slow, erratic, still being looked up, or dropped often, and
     those call for different practice. A combined score would hide which.
+
+    One phase at a time, too. Ranking an OLL case against a PLL case puts two
+    incomparable things in one list: the numbers are the same numbers, but "my
+    worst case" then means whichever phase happens to be slower overall.
     """
 
     SIGNALS = (
@@ -466,19 +557,28 @@ class StatsScreen(Screen):
         ("dnf_rate", "DNFs"),
     )
 
-    def __init__(self, app):
+    def __init__(self, app, catalogues=None):
         self.app = app
+        self.catalogues = tuple(catalogues or app.catalogues)
+        self.phase_index = 0
         self.signal = 0
         self.reports = self._build()
 
+    @property
+    def catalogue(self):
+        return self.catalogues[self.phase_index]
+
     def _build(self):
+        phase = self.catalogue.phase
         reports = []
-        for case_id in self.app.store.practised_case_ids():
+        for case_id in self.app.store.practised_case_ids(phase):
             try:
-                case = pll.get(case_id)
+                case = self.catalogue.get(case_id)
             except KeyError:
+                # History outlives the case list. An id nobody recognises any
+                # more is a row we cannot name, not a reason to lose the rest.
                 continue
-            rows = self.app.store.reps(case_id=case_id)
+            rows = self.app.store.reps(case_id=case_id, phase=phase)
             moves = move_count(algorithm_for(case, self.app.overrides))
             report = case_report(case_id, rows, moves)
             if report:
@@ -492,11 +592,19 @@ class StatsScreen(Screen):
             return "back"
         if event.key == pygame.K_TAB:
             self.signal = (self.signal + 1) % len(self.SIGNALS)
+        elif event.key in (pygame.K_RIGHT, pygame.K_l):
+            self._show_phase(self.phase_index + 1)
+        elif event.key in (pygame.K_LEFT, pygame.K_h):
+            self._show_phase(self.phase_index - 1)
         return None
+
+    def _show_phase(self, index):
+        self.phase_index = index % len(self.catalogues)
+        self.reports = self._build()
 
     def draw(self, surface):
         surface.fill(BACKGROUND)
-        theme.text(surface, "Statistics", (40, 28), 30, TEXT, True)
+        theme.text(surface, f"{self.catalogue.phase} statistics", (40, 28), 30, TEXT, True)
         signal, label = self.SIGNALS[self.signal]
         theme.text(surface, f"sorted by {label}  (tab to change)",
                    (WINDOW[0] - 40, 36), 19, ACCENT, right=True)
@@ -522,8 +630,9 @@ class StatsScreen(Screen):
 
         top += 14
         if not self.reports:
-            theme.text(surface, "No drill reps recorded yet.", (40, top), 22, TEXT_DIM)
-            theme.text(surface, "esc back", (WINDOW[0] // 2, WINDOW[1] - 30), 16, TEXT_DIM, centre=True)
+            theme.text(surface, f"No {self.catalogue.phase} reps recorded yet.",
+                       (40, top), 22, TEXT_DIM)
+            self._draw_help(surface)
             return
 
         headers = ("case", "reps", "mean", "trimmed", "s/move", "spread", "peeks", "DNFs")
@@ -538,7 +647,7 @@ class StatsScreen(Screen):
             thin = not report.has_enough_data
             colour = TEXT_DIM if thin else TEXT
             values = (
-                pll.get(report.case_id).name,
+                self.catalogue.get(report.case_id).name,
                 str(report.attempts),
                 theme.format_time(report.mean),
                 theme.format_time(report.trimmed_mean),
@@ -553,8 +662,17 @@ class StatsScreen(Screen):
                 theme.text(surface, "few reps", (960, top), 15, TEXT_DIM)
             top += 28
 
+        self._draw_help(surface)
+
+    def _draw_help(self, surface):
+        phases = "   ".join(
+            (f"[{c.phase}]" if c is self.catalogue else c.phase)
+            for c in self.catalogues
+        )
+        theme.text(surface, f"arrows change phase: {phases}",
+                   (WINDOW[0] // 2, HELP_LINE - 24), 16, TEXT_DIM, centre=True)
         theme.text(surface, "tab changes the ranking signal   esc back",
-                   (WINDOW[0] // 2, WINDOW[1] - 30), 16, TEXT_DIM, centre=True)
+                   (WINDOW[0] // 2, HELP_LINE), 16, TEXT_DIM, centre=True)
 
 
 # --------------------------------------------------------------------------
@@ -566,6 +684,7 @@ class App:
         self.surface = pygame.display.set_mode(WINDOW)
         self.clock = pygame.time.Clock()
         self.store = store or Store()
+        self.catalogues = CATALOGUES
         self.overrides = self.store.algorithm_overrides()
         self.rng = random.Random(seed)
         self.now = 0.0
