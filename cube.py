@@ -131,11 +131,22 @@ def scramble_generator():
         scramble.append(face + modifier)
     return scramble
 
+def solution_scorer(solution):
+    move_axis = {'R': 'x', 'L': 'x', 'U': 'y', 'D': 'y', 'F': 'z', 'B': 'z'}
+    score = 0 
+    prev_move = None
+    for x in solution:
+        if prev_move and move_axis[x[0]] != move_axis[prev_move[0]]:
+            score -= 0.3
+        score += 1
+        prev_move = x
+    return score
+
 cube = create_solved_cube()
 # print_cube(cube)
 # print_cube_indices(cube)
 scramble = scramble_generator()
-moves(cube, ['R', 'U'])
+moves(cube, scramble)
 kociemba_solution = kociemba.solve(''.join(cube))
-moves(cube, kociemba_solution.split())
-print_cube(cube)
+print(kociemba_solution)
+print(solution_scorer(["R", "U", "R'", "U'"]))
