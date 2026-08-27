@@ -59,3 +59,11 @@ inverse. PLL and OLL still declare one and it is still checked.
 If someone later transcribes a curated list, the tests that are true by
 construction start earning their keep again and this decision can be revisited
 without anything else moving.
+
+## Since then
+
+The 41 have been read through by a cuber and look like algorithms worth
+learning. That is not a line-by-line proof and it does not make the tests above
+mean more than they do, but it does retire the thing that actually worried us
+when this was written: that a list nobody had ever looked at was shipping as the
+whole of a phase.

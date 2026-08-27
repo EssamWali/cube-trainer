@@ -19,7 +19,8 @@ from cubetrainer.ui.app import (SOLVE_PHASES, WHOLE_SOLVE, App, DrillScreen,
                                HomeScreen,
                                algorithm_for,
                                PickerScreen, SolveScreen, SolveSetupScreen,
-                               StatsScreen, solve_split_labels)
+                               StatsScreen, LAST_USED,
+                               solve_split_labels)
 from cubetrainer.ui.theme import ACCENT, READY
 
 
@@ -1401,3 +1402,131 @@ def test_a_run_of_solves_that_all_failed_says_so_by_saying_nothing(app):
 
 def test_the_statistics_draw_with_no_solves_at_all(app):
     assert not any(line.startswith("best") for line in lines_drawn(StatsScreen(app)))
+
+
+# --- saved case sets are not a one-way door ---------------------------------
+
+def a_picker_holding(app, names, catalogue=None):
+    """A picker with these sets already saved, with the list open."""
+    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+    for name in names:
+        app.store.save_case_set(name, picker.phase, first_ids(picker.catalogue))
+    key_down(picker, app, pygame.K_o)
+    assert picker.prompt == "load"
+    return picker
+
+
+def under_the_cursor(picker):
+    return picker.saved_sets[picker.prompt_cursor]
+
+
+def test_every_saved_case_set_is_reachable_however_many_there_are(app):
+    """The list used to stop at nine, because it was addressed by the digit
+    keys. A tenth set was not paged or greyed out, it was absent -- and nothing
+    could delete a set to make room, so the only way to reach it was to edit the
+    database by hand."""
+    names = [f"set {number:02}" for number in range(1, 13)]
+    picker = a_picker_holding(app, names)
+    assert len(picker.saved_sets) == 12
+
+    seen = []
+    for _ in names:
+        window, _ = picker.visible_sets()
+        assert under_the_cursor(picker) in window, "the cursor walked off screen"
+        seen.append(under_the_cursor(picker))
+        key_down(picker, app, pygame.K_DOWN)
+    assert sorted(seen) == sorted(names), "a saved set could not be reached"
+
+
+def test_enter_opens_the_set_under_the_cursor(app):
+    picker = a_picker_holding(app, ["alpha", "beta"])
+    app.store.save_case_set("beta", picker.phase, ["Ja", "H"])
+    key_down(picker, app, pygame.K_DOWN)
+    assert under_the_cursor(picker) == "beta"
+    key_down(picker, app, pygame.K_RETURN)
+    assert picker.prompt is None
+    assert picker.selected == {"Ja", "H"}
+    assert "beta" in picker.message
+
+
+def test_the_digit_keys_still_pick_from_what_is_on_screen(app):
+    """Picking the second of three should not take three keypresses."""
+    picker = a_picker_holding(app, ["alpha", "beta", "gamma"])
+    app.store.save_case_set("gamma", picker.phase, ["H"])
+    key_down(picker, app, pygame.K_3, unicode="3")
+    assert picker.prompt is None
+    assert picker.selected == {"H"}
+
+
+def test_deleting_a_case_set_takes_two_presses(app):
+    """The only destructive thing in the interface, and what it destroys is a
+    selection somebody put together by hand."""
+    picker = a_picker_holding(app, ["keep", "throw"])
+    key_down(picker, app, pygame.K_DOWN)
+    assert under_the_cursor(picker) == "throw"
+
+    key_down(picker, app, pygame.K_x)
+    assert picker.saved_sets == ["keep", "throw"], "one press deleted it"
+    assert picker.prompt_doomed == "throw"
+
+    key_down(picker, app, pygame.K_x)
+    assert picker.saved_sets == ["keep"]
+    assert "throw" in picker.message
+
+
+def test_moving_off_a_set_takes_back_the_first_press(app):
+    """Asking to delete and then moving away is changing your mind, so the next
+    x must not fall through onto whatever is under the cursor now."""
+    picker = a_picker_holding(app, ["keep", "throw"])
+    key_down(picker, app, pygame.K_DOWN)
+    key_down(picker, app, pygame.K_x)
+    key_down(picker, app, pygame.K_UP)
+    assert picker.prompt_doomed is None
+    key_down(picker, app, pygame.K_x)
+    assert picker.saved_sets == ["keep", "throw"], "a set was deleted by one press"
+
+
+def test_deleting_one_set_leaves_the_others_and_the_selection_alone(app):
+    picker = a_picker_holding(app, ["one", "two", "three"])
+    app.store.save_case_set("two", picker.phase, ["Ja"])
+    chosen = set(picker.selected)
+    while under_the_cursor(picker) != "two":
+        key_down(picker, app, pygame.K_DOWN)
+    key_down(picker, app, pygame.K_x)
+    key_down(picker, app, pygame.K_x)
+    assert picker.saved_sets == ["one", "three"]
+    assert app.store.load_case_set("one", picker.phase) is not None
+    assert picker.selected == chosen, "deleting a set changed what was chosen"
+
+
+def test_deleting_the_last_set_closes_the_list(app):
+    """An empty list is a box with nothing in it and no way to say so."""
+    picker = a_picker_holding(app, ["only"])
+    key_down(picker, app, pygame.K_x)
+    key_down(picker, app, pygame.K_x)
+    assert picker.saved_sets == []
+    assert picker.prompt is None
+    key_down(picker, app, pygame.K_o)
+    assert picker.prompt is None, "an empty list was opened"
+
+
+def test_the_list_never_offers_the_set_the_picker_keeps_for_itself(app):
+    """Restoring the last selection is something the screen does, not something
+    a cuber saved."""
+    picker = PickerScreen(app, mode="select")
+    app.store.save_case_set(LAST_USED, picker.phase, ["T"])
+    app.store.save_case_set("mine", picker.phase, ["T"])
+    assert picker.saved_sets == ["mine"]
+
+
+def test_the_case_set_list_draws_at_every_length(app):
+    surface = pygame.Surface((1180, 780))
+    for count in (1, 5, 8, 9, 20):
+        fresh = App(store=Store.in_memory(), seed=1)
+        picker = a_picker_holding(fresh, [f"set {n:02}" for n in range(count)])
+        picker.draw(surface)
+        for _ in range(count):
+            key_down(picker, fresh, pygame.K_DOWN)
+            picker.draw(surface)
+        key_down(picker, fresh, pygame.K_x)
+        picker.draw(surface)

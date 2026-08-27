@@ -172,6 +172,10 @@ class PickerScreen(Screen):
         self.prompt = None
         self.prompt_text = ""
         self.prompt_error = None
+        #: Where the cursor sits in the list of saved sets, and which of them
+        #: has been asked to be deleted once and is waiting to be asked twice.
+        self.prompt_cursor = 0
+        self.prompt_doomed = None
         self.message = None
         restored = (app.store.load_case_set(LAST_USED, self.phase)
                     if mode == "select" else None)
@@ -340,10 +344,9 @@ class PickerScreen(Screen):
         elif key == pygame.K_s:
             self.prompt, self.prompt_text = "save", ""
         elif key == pygame.K_o:
-            names = self.app.store.case_set_names(self.phase)
-            names = [n for n in names if n != LAST_USED]
-            if names:
+            if self.saved_sets:
                 self.prompt, self.prompt_text = "load", ""
+                self.prompt_cursor, self.prompt_doomed = 0, None
         elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             if not self.selected:
                 self.message = "select at least one case"
@@ -353,9 +356,88 @@ class PickerScreen(Screen):
             return DrillScreen(self.app, chosen, self.catalogue)
         return None
 
+    #: How many saved sets the box shows at once. The rest are still there and
+    #: still reachable; the list scrolls to them.
+    SETS_ON_SCREEN = 8
+
+    @property
+    def saved_sets(self):
+        """The sets a cuber has saved in this phase.
+
+        Without the one the picker keeps for itself: restoring the last
+        selection is something the screen does, not something a cuber saved.
+        """
+        return [name for name in self.app.store.case_set_names(self.phase)
+                if name != LAST_USED]
+
+    def visible_sets(self):
+        """The window of saved sets on screen, and where it starts.
+
+        The list used to stop at nine because it was addressed by the digit
+        keys, and a tenth set was not paged or greyed out but simply absent.
+        What is on screen is now a window that follows the cursor.
+        """
+        names = self.saved_sets
+        first = max(0, min(self.prompt_cursor - self.SETS_ON_SCREEN + 1,
+                           len(names) - self.SETS_ON_SCREEN))
+        return names[first:first + self.SETS_ON_SCREEN], max(0, first)
+
+    def _open_case_set(self, name):
+        self.selected = set(self.app.store.load_case_set(name, self.phase) or [])
+        self.message = f"loaded {name!r}"
+        self.prompt = None
+
+    def _delete_case_set(self, name):
+        """Throw a saved set away, once the cuber has said so twice.
+
+        The only destructive thing in the interface, and what it destroys is a
+        selection somebody put together by hand, so a single mistyped key must
+        not do it.
+        """
+        if self.prompt_doomed != name:
+            self.prompt_doomed = name
+            return
+        self.app.store.delete_case_set(name, self.phase)
+        self.prompt_doomed = None
+        self.message = f"deleted {name!r}"
+        remaining = self.saved_sets
+        if not remaining:
+            self.prompt = None
+        else:
+            self.prompt_cursor = min(self.prompt_cursor, len(remaining) - 1)
+
+    def _handle_case_sets(self, event):
+        """Moving through the saved sets, opening one, or throwing one away."""
+        names = self.saved_sets
+        if not names:
+            self.prompt = None
+            return None
+        key = event.key
+        if key in (pygame.K_DOWN, pygame.K_j):
+            self.prompt_cursor = (self.prompt_cursor + 1) % len(names)
+            self.prompt_doomed = None
+        elif key in (pygame.K_UP, pygame.K_k):
+            self.prompt_cursor = (self.prompt_cursor - 1) % len(names)
+            self.prompt_doomed = None
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self._open_case_set(names[self.prompt_cursor])
+        elif key == pygame.K_x:
+            self._delete_case_set(names[self.prompt_cursor])
+        elif event.unicode.isdigit():
+            # A shortcut for what is on screen: picking the second of three
+            # should not take three keypresses.
+            window, first = self.visible_sets()
+            index = int(event.unicode) - 1
+            if 0 <= index < len(window):
+                self._open_case_set(window[index])
+        return None
+
     def _handle_prompt(self, event):
         if event.key == pygame.K_ESCAPE:
             self.prompt = None
+            self.prompt_doomed = None
+        elif self.prompt == "load":
+            return self._handle_case_sets(event)
         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             if self.prompt == "algorithm":
                 if not self._keep_algorithm():
@@ -369,15 +451,6 @@ class PickerScreen(Screen):
         elif event.key == pygame.K_BACKSPACE:
             self.prompt_text = self.prompt_text[:-1]
             self.prompt_error = None
-        elif self.prompt == "load" and event.unicode.isdigit():
-            names = [n for n in self.app.store.case_set_names(self.phase)
-                     if n != LAST_USED]
-            index = int(event.unicode) - 1
-            if 0 <= index < len(names):
-                loaded = self.app.store.load_case_set(names[index], self.phase)
-                self.selected = set(loaded or [])
-                self.message = f"loaded {names[index]!r}"
-                self.prompt = None
         elif self.prompt in ("save", "algorithm") and event.unicode.isprintable():
             self.prompt_text += event.unicode
             self.prompt_error = None
@@ -466,7 +539,8 @@ class PickerScreen(Screen):
         overlay = pygame.Surface(WINDOW, pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 190))
         surface.blit(overlay, (0, 0))
-        box = pygame.Rect(0, 0, 620, 200)
+        rows = len(self.visible_sets()[0]) if self.prompt == "load" else 0
+        box = pygame.Rect(0, 0, 620, max(200, 150 + rows * 26))
         box.center = (WINDOW[0] // 2, WINDOW[1] // 2)
         pygame.draw.rect(surface, PANEL, box, border_radius=10)
         if self.prompt == "algorithm":
@@ -489,13 +563,29 @@ class PickerScreen(Screen):
             theme.text(surface, self.prompt_text + "_", (box.centerx, box.top + 80), 26, ACCENT, centre=True)
             theme.text(surface, "enter to save, esc to cancel", (box.centerx, box.bottom - 40), 16, TEXT_DIM, centre=True)
         else:
-            names = [n for n in self.app.store.case_set_names(self.phase)
-                     if n != LAST_USED]
-            theme.text(surface, "Open a case set", (box.centerx, box.top + 20), 24, TEXT, True, centre=True)
-            for index, name in enumerate(names[:9]):
-                theme.text(surface, f"{index + 1}. {name}", (box.centerx, box.top + 66 + index * 26),
-                           19, TEXT, centre=True)
-            theme.text(surface, "press a number, esc to cancel", (box.centerx, box.bottom - 34), 16, TEXT_DIM, centre=True)
+            self._draw_case_sets(surface, box)
+
+    def _draw_case_sets(self, surface, box):
+        names = self.saved_sets
+        window, first = self.visible_sets()
+        theme.text(surface, "Open a case set", (box.centerx, box.top + 20), 24,
+                   TEXT, True, centre=True)
+        top = box.top + 62
+        for offset, name in enumerate(window):
+            here = first + offset == self.prompt_cursor
+            doomed = name == self.prompt_doomed
+            colour = DANGER if doomed else (ACCENT if here else TEXT)
+            said = f"{'>' if here else ' '} {offset + 1}. {name}"
+            if doomed:
+                said += "   x again to delete"
+            theme.text(surface, said, (box.centerx, top + offset * 26), 19,
+                       colour, here, centre=True)
+        if len(names) > len(window):
+            theme.text(surface, f"{len(names) - len(window)} more",
+                       (box.centerx, top + len(window) * 26), 15, TEXT_DIM,
+                       centre=True)
+        theme.text(surface, "arrows move   enter opens   x deletes   esc cancels",
+                   (box.centerx, box.bottom - 30), 16, TEXT_DIM, centre=True)
 
 
 # --------------------------------------------------------------------------

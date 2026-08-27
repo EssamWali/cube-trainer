@@ -351,3 +351,22 @@ def test_a_plus_two_on_a_rep_with_no_time_does_nothing(store):
     store.penalise_rep(rep, "plus_two")
     recorded, = store.reps()
     assert recorded["duration_ms"] is None
+
+
+def test_deleting_a_case_set_leaves_the_same_name_in_another_phase_alone(store):
+    """A case set belongs to one phase, so "hard" can mean one thing in PLL and
+    another in OLL. Throwing one away must not take the other with it."""
+    store.save_case_set("hard", "PLL", ["T", "Ja"])
+    store.save_case_set("hard", "OLL", ["OLL 21"])
+    store.save_case_set("easy", "PLL", ["H"])
+
+    store.delete_case_set("hard", "PLL")
+    assert store.case_set_names("PLL") == ["easy"]
+    assert store.case_set_names("OLL") == ["hard"]
+    assert store.load_case_set("hard", "PLL") is None
+    assert store.load_case_set("hard", "OLL") == ["OLL 21"]
+
+
+def test_deleting_a_case_set_that_is_not_there_is_not_an_error(store):
+    store.delete_case_set("never saved", "PLL")
+    assert store.case_set_names("PLL") == []

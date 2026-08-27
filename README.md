@@ -43,6 +43,7 @@ mean one thing in PLL and another in OLL.
 | `g` | toggle its whole group |
 | `a` / `n` | select all / none |
 | `s` / `o` | save the selection under a name / open a saved one |
+| in the open list | arrows move, `enter` opens, `x` twice deletes |
 | `enter` | start drilling |
 
 Nothing is selected to begin with, so choosing three cases is three keypresses
