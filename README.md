@@ -93,6 +93,19 @@ here assumes a solved one too.
 **Algorithm library** — the same grid, browsable, with each case's algorithm,
 one entry per phase.
 
+Press `e` to replace an algorithm with the one you actually use, and `r` to go
+back to the shipped one. What you type is checked against the cube before it is
+kept: it has to solve the case *and* give the cube back as you picked it up, so
+an algorithm ending on a regrip you never take back is refused — left that way
+it is ambiguous, because which case it solves depends on how you were holding
+the cube when you finished. A refusal says what is wrong and keeps what you
+typed. Your algorithm is what the drill reveals and what seconds per move is
+counted against, and it lives in its own table, so updating the application
+never overwrites it.
+
+It does not change your scrambles. A scramble is the inverse of the case's
+setup, not of the algorithm on screen.
+
 **Statistics** — every drilled case, ranked. Weakness is shown as five separate
 numbers rather than one score, because a case can be slow, erratic, still being
 looked up, or dropped often, and those need different practice. `tab` changes
@@ -150,7 +163,3 @@ pytest
 F2L. It is a phase everywhere in the vocabulary and in the phase splits, but
 there are no F2L cases to drill, only a boundary to press at.
 
-Choosing your own algorithm for a case. The store keeps overrides in their own
-table so that updating the application never overwrites what you have learned,
-and the drill and the library both show yours if one is set — but nothing on
-screen can set one yet.
