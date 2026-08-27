@@ -77,12 +77,20 @@ class Case:
 
 
 class Catalogue:
-    """Every case of one phase, and the phase itself."""
+    """Every case of one phase, and the phase itself.
 
-    def __init__(self, phase, cases, group_order):
+    A phase says whether it is drilled as well as what its cases are, because
+    not every phase is. A drill hands out a scramble and asks the cuber to
+    apply it to a solved cube, and that is a way of meeting some cases and not
+    others -- see docs/adr/0004. A phase that is not drilled still has
+    algorithms worth reading, so it still has a catalogue.
+    """
+
+    def __init__(self, phase, cases, group_order, drilled=True):
         self.phase = phase
         self.cases = tuple(cases)
         self.group_order = tuple(group_order)
+        self.drilled = drilled
         self._by_id = {case.id: case for case in self.cases}
 
     def get(self, case_id):

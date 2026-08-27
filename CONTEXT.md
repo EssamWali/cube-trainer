@@ -53,9 +53,15 @@ silhouettes, which is a fact about how a case looks rather than one the cube
 can be asked about.
 
 **Catalogue**:
-Every case of one phase, together with the phase's name and the order its
-groups are shown in. What a screen is handed instead of a case list, so that
-adding a phase is data rather than a change to every screen.
+Every case of one phase, together with the phase's name, the order its groups
+are shown in, and whether the phase is drilled. What a screen is handed instead
+of a case list, so that adding a phase is data rather than a change to every
+screen.
+
+**Drilled phase**:
+A phase whose cases a drill can hand out, because a scramble applied to a solved
+cube is a fair way to meet them. OLL and PLL are; F2L is not, and has a
+catalogue for its algorithms without a drill.
 
 **Algorithm**:
 A sequence that solves one case and leaves the cube held as it was picked up. A

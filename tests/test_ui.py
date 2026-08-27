@@ -61,19 +61,27 @@ def test_the_home_screen_opens_the_picker(app):
     assert result.mode == "select"
 
 
-def test_the_home_screen_offers_a_drill_for_every_phase(app):
+def test_the_home_screen_offers_a_drill_for_every_phase_that_is_drilled(app):
+    """A phase that is not drilled has no drill on the menu. Which those are is
+    the catalogue's to say, so this screen names none of them."""
     home = HomeScreen(app)
-    for index, catalogue in enumerate(app.catalogues):
+    drilled = [c for c in app.catalogues if c.drilled]
+    assert drilled, "no phase is drilled, so this is testing nothing"
+    for index, catalogue in enumerate(drilled):
         result = key_down(home, app, pygame.K_1 + index)
         assert isinstance(result, PickerScreen)
         assert result.mode == "select"
         assert result.catalogue is catalogue
+    labels = [label for label, _ in home.items]
+    for catalogue in app.catalogues:
+        offered = f"Drill {catalogue.phase}" in labels
+        assert offered is catalogue.drilled, catalogue.phase
 
 
 def test_the_library_is_the_picker_in_browse_mode(app):
     """One library entry per phase, after the drills."""
     home = HomeScreen(app)
-    first = pygame.K_1 + len(app.catalogues)
+    first = pygame.K_1 + len([c for c in app.catalogues if c.drilled])
     for index, catalogue in enumerate(app.catalogues):
         result = key_down(home, app, first + index)
         assert isinstance(result, PickerScreen)
@@ -345,10 +353,23 @@ def test_stats_survive_a_case_id_that_is_no_longer_known(app):
 # --- every phase ------------------------------------------------------------
 # The drill is the same drill whichever phase it is drilling, so these run over
 # each catalogue the application ships rather than being written out twice.
+#
+# Two fixtures, because not every phase is drilled. `catalogue` is every phase
+# the trainer knows, which is what the picker and the library serve;
+# `drilled_catalogue` is the subset a drill can hand out, which is what the
+# drill and the statistics serve.
+
+DRILLED = [c for c in CATALOGUES if c.drilled]
+
 
 @pytest.fixture(params=[c.phase for c in CATALOGUES])
 def catalogue(request):
     return next(c for c in CATALOGUES if c.phase == request.param)
+
+
+@pytest.fixture(params=[c.phase for c in DRILLED])
+def drilled_catalogue(request):
+    return next(c for c in DRILLED if c.phase == request.param)
 
 
 def first_ids(catalogue, count=1):
@@ -385,30 +406,30 @@ def test_a_named_case_set_belongs_to_one_phase_only(app):
     assert len({tuple(v) for v in saved.values()}) == len(saved)
 
 
-def test_the_last_selection_comes_back_for_each_phase(app, catalogue):
-    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+def test_the_last_selection_comes_back_for_each_phase(app, drilled_catalogue):
+    picker = PickerScreen(app, mode="select", catalogue=drilled_catalogue)
     key_down(picker, app, pygame.K_n)
     key_down(picker, app, pygame.K_SPACE)
     chosen = set(picker.selected)
     key_down(picker, app, pygame.K_RETURN)
-    assert PickerScreen(app, mode="select", catalogue=catalogue).selected == chosen
+    assert PickerScreen(app, mode="select", catalogue=drilled_catalogue).selected == chosen
 
 
-def test_starting_a_drill_needs_at_least_one_case_in_any_phase(app, catalogue):
-    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+def test_starting_a_drill_needs_at_least_one_case_in_any_phase(app, drilled_catalogue):
+    picker = PickerScreen(app, mode="select", catalogue=drilled_catalogue)
     key_down(picker, app, pygame.K_n)
     assert key_down(picker, app, pygame.K_RETURN) is None
     assert picker.message
 
 
-def test_a_rep_is_recorded_against_a_session_tagged_with_its_phase(app, catalogue):
-    case_id, = first_ids(catalogue)
-    drill = DrillScreen(app, [case_id], catalogue)
+def test_a_rep_is_recorded_against_a_session_tagged_with_its_phase(app, drilled_catalogue):
+    case_id, = first_ids(drilled_catalogue)
+    drill = DrillScreen(app, [case_id], drilled_catalogue)
     do_a_rep(drill, app, start=0.0, finish=2.5)
     rep, = app.store.reps()
     assert rep["case_id"] == case_id
     session, = app.store.sessions()
-    assert session["phase"] == catalogue.phase
+    assert session["phase"] == drilled_catalogue.phase
     assert session["kind"] == "drill"
 
 
@@ -432,9 +453,9 @@ def _lands_on(state, promised):
     return is_oll_state(state) and orientation_key(state) == orientation_key(promised)
 
 
-def test_the_scramble_produces_the_case_being_drilled_in_any_phase(app, catalogue):
+def test_the_scramble_produces_the_case_being_drilled_in_any_phase(app, drilled_catalogue):
     """The trainer's central claim, for whichever phase is being drilled."""
-    drill = DrillScreen(app, [c.id for c in catalogue], catalogue)
+    drill = DrillScreen(app, [c.id for c in drilled_catalogue], drilled_catalogue)
     for _ in range(25):
         assert _lands_on(Cube.solved().apply(drill.scramble),
                          Cube.solved().apply(drill.case.setup)), drill.case.id
@@ -442,8 +463,8 @@ def test_the_scramble_produces_the_case_being_drilled_in_any_phase(app, catalogu
         key_down(drill, app, pygame.K_SPACE)
 
 
-def test_the_case_stays_hidden_until_it_is_revealed_in_any_phase(app, catalogue):
-    drill = DrillScreen(app, first_ids(catalogue), catalogue)
+def test_the_case_stays_hidden_until_it_is_revealed_in_any_phase(app, drilled_catalogue):
+    drill = DrillScreen(app, first_ids(drilled_catalogue), drilled_catalogue)
     drawn = []
     original = render.draw_case
 
@@ -463,8 +484,8 @@ def test_the_case_stays_hidden_until_it_is_revealed_in_any_phase(app, catalogue)
         render.draw_case = original
 
 
-def test_peeking_keeps_the_rep_out_of_the_average_in_any_phase(app, catalogue):
-    drill = DrillScreen(app, first_ids(catalogue), catalogue)
+def test_peeking_keeps_the_rep_out_of_the_average_in_any_phase(app, drilled_catalogue):
+    drill = DrillScreen(app, first_ids(drilled_catalogue), drilled_catalogue)
     key_down(drill, app, pygame.K_p)
     do_a_rep(drill, app)
     rep, = app.store.reps()
@@ -472,8 +493,8 @@ def test_peeking_keeps_the_rep_out_of_the_average_in_any_phase(app, catalogue):
     assert drill.times == []
 
 
-def test_a_fumble_and_a_penalty_behave_the_same_in_any_phase(app, catalogue):
-    drill = DrillScreen(app, first_ids(catalogue), catalogue)
+def test_a_fumble_and_a_penalty_behave_the_same_in_any_phase(app, drilled_catalogue):
+    drill = DrillScreen(app, first_ids(drilled_catalogue), drilled_catalogue)
     key_down(drill, app, pygame.K_d)
     assert drill.stage == "reset"
     key_down(drill, app, pygame.K_SPACE)
@@ -486,8 +507,8 @@ def test_a_fumble_and_a_penalty_behave_the_same_in_any_phase(app, catalogue):
     assert timed["duration_ms"] == pytest.approx(3800, abs=1)
 
 
-def test_leaving_a_drill_closes_its_session_in_any_phase(app, catalogue):
-    drill = DrillScreen(app, first_ids(catalogue), catalogue)
+def test_leaving_a_drill_closes_its_session_in_any_phase(app, drilled_catalogue):
+    drill = DrillScreen(app, first_ids(drilled_catalogue), drilled_catalogue)
     do_a_rep(drill, app)
     assert key_down(drill, app, pygame.K_ESCAPE) == "back"
     session, = app.store.sessions()
@@ -528,10 +549,10 @@ def drill_a_few(app, catalogue, case_id, count=3):
     key_down(drill, app, pygame.K_ESCAPE)
 
 
-def test_drilled_cases_of_any_phase_reach_the_statistics(app, catalogue):
-    case_id, = first_ids(catalogue)
-    drill_a_few(app, catalogue, case_id)
-    stats = show_phase(StatsScreen(app), app, catalogue)
+def test_drilled_cases_of_any_phase_reach_the_statistics(app, drilled_catalogue):
+    case_id, = first_ids(drilled_catalogue)
+    drill_a_few(app, drilled_catalogue, case_id)
+    stats = show_phase(StatsScreen(app), app, drilled_catalogue)
     assert [r.case_id for r in stats.reports] == [case_id]
     assert stats.reports[0].attempts == 3
     assert stats.reports[0].seconds_per_move is not None
@@ -539,12 +560,14 @@ def test_drilled_cases_of_any_phase_reach_the_statistics(app, catalogue):
 
 
 def test_a_key_switches_which_phase_is_ranked(app):
+    """Only the phases that are drilled: a ranking of a phase nobody can drill
+    is a page that is empty for a reason the cuber cannot see."""
     stats = StatsScreen(app)
     seen = [stats.catalogue.phase]
-    for _ in range(len(app.catalogues) - 1):
+    for _ in range(len(DRILLED) - 1):
         key_down(stats, app, pygame.K_RIGHT)
         seen.append(stats.catalogue.phase)
-    assert seen == [c.phase for c in app.catalogues]
+    assert seen == [c.phase for c in DRILLED]
     key_down(stats, app, pygame.K_RIGHT)
     assert stats.catalogue.phase == seen[0], "the phases should cycle"
     key_down(stats, app, pygame.K_LEFT)
@@ -554,10 +577,10 @@ def test_a_key_switches_which_phase_is_ranked(app):
 def test_the_two_phases_are_never_mixed_into_one_ranking(app):
     """Ranking an OLL case against a PLL case compares two things that are not
     comparable, so each phase gets its own list."""
-    for catalogue in app.catalogues:
+    for catalogue in DRILLED:
         drill_a_few(app, catalogue, first_ids(catalogue)[0])
     stats = StatsScreen(app)
-    for catalogue in app.catalogues:
+    for catalogue in DRILLED:
         show_phase(stats, app, catalogue)
         drilled = {c.id for c in catalogue}
         assert [r.case_id for r in stats.reports] == first_ids(catalogue)
@@ -566,18 +589,18 @@ def test_the_two_phases_are_never_mixed_into_one_ranking(app):
 
 def test_tab_still_changes_the_ranking_signal_in_every_phase(app):
     stats = StatsScreen(app)
-    for _ in app.catalogues:
+    for _ in DRILLED:
         first = stats.signal
         key_down(stats, app, pygame.K_TAB)
         assert stats.signal != first
         key_down(stats, app, pygame.K_RIGHT)
 
 
-def test_statistics_survive_a_case_id_that_is_no_longer_known(app, catalogue):
+def test_statistics_survive_a_case_id_that_is_no_longer_known(app, drilled_catalogue):
     """History outlives the case list, in every phase."""
-    session = app.store.start_session("drill", catalogue.phase)
+    session = app.store.start_session("drill", drilled_catalogue.phase)
     app.store.record_rep(session, "NotACase", "R U", 2.0)
-    stats = show_phase(StatsScreen(app), app, catalogue)
+    stats = show_phase(StatsScreen(app), app, drilled_catalogue)
     assert stats.reports == []
     stats.draw(pygame.Surface((1180, 780)))
 
@@ -633,25 +656,25 @@ def border_colours(surface, rect):
     return {surface.get_at(point)[:3] for point in edge}
 
 
-def test_nothing_is_chosen_until_the_cuber_chooses_it(app, catalogue):
+def test_nothing_is_chosen_until_the_cuber_chooses_it(app, drilled_catalogue):
     """Arriving with all fifty-seven selected means "drill these three" starts
     with deselecting fifty-four."""
-    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+    picker = PickerScreen(app, mode="select", catalogue=drilled_catalogue)
     assert picker.selected == set()
 
 
-def test_a_all_chooses_every_case_and_n_clears_them(app, catalogue):
-    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+def test_a_all_chooses_every_case_and_n_clears_them(app, drilled_catalogue):
+    picker = PickerScreen(app, mode="select", catalogue=drilled_catalogue)
     key_down(picker, app, pygame.K_a)
-    assert picker.selected == {c.id for c in catalogue}
+    assert picker.selected == {c.id for c in drilled_catalogue}
     key_down(picker, app, pygame.K_n)
     assert picker.selected == set()
 
 
-def test_a_chosen_case_is_ringed_in_green(app, catalogue):
+def test_a_chosen_case_is_ringed_in_green(app, drilled_catalogue):
     """The mark has to survive being glanced at across a grid, which a dot in
     one corner does not."""
-    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+    picker = PickerScreen(app, mode="select", catalogue=drilled_catalogue)
     surface = pygame.Surface((1180, 780))
     chosen_id = picker.current.id
     rect = tile_of(picker, chosen_id)
@@ -669,10 +692,10 @@ def test_a_chosen_case_is_ringed_in_green(app, catalogue):
     assert READY not in border_colours(surface, rect)
 
 
-def test_the_cursor_and_the_choice_are_both_visible_on_one_tile(app, catalogue):
+def test_the_cursor_and_the_choice_are_both_visible_on_one_tile(app, drilled_catalogue):
     """They are different facts, and the tile the cursor is on is exactly the
     tile you are about to choose."""
-    picker = PickerScreen(app, mode="select", catalogue=catalogue)
+    picker = PickerScreen(app, mode="select", catalogue=drilled_catalogue)
     surface = pygame.Surface((1180, 780))
     key_down(picker, app, pygame.K_a)
     picker.draw(surface)
@@ -1016,7 +1039,7 @@ def test_a_solve_contributes_no_reps_and_no_case(app):
     key_down(solve, app, pygame.K_ESCAPE)
     assert app.store.reps() == []
     assert app.store.practised_case_ids() == []
-    for catalogue in app.catalogues:
+    for catalogue in DRILLED:
         stats = show_phase(StatsScreen(app), app, catalogue)
         assert stats.reports == []
         stats.draw(pygame.Surface((1180, 780)))
@@ -1219,12 +1242,13 @@ def test_an_override_for_a_case_nobody_recognises_breaks_nothing(app):
 # --- three phases, one set of screens ---------------------------------------
 
 def test_every_phase_the_trainer_has_is_offered(app):
-    """The home screen names no phase. It builds a drill and a library for each
-    catalogue it is handed, so a phase arriving is data."""
+    """The home screen names no phase. It builds a library for every catalogue
+    it is handed and a drill for each one that says it is drilled, so a phase
+    arriving is data."""
     labels = [label for label, _ in HomeScreen(app).items]
     for catalogue in app.catalogues:
-        assert f"Drill {catalogue.phase}" in labels
         assert f"{catalogue.phase} algorithm library" in labels
+        assert (f"Drill {catalogue.phase}" in labels) is catalogue.drilled
     assert {"PLL", "OLL", "F2L"} <= {c.phase for c in app.catalogues}
 
 
@@ -1237,6 +1261,11 @@ def test_a_phase_the_trainer_has_never_heard_of_is_offered_too(app):
     labels = [label for label, _ in HomeScreen(app).items]
     assert "Drill XLL" in labels
     assert "XLL algorithm library" in labels
+    quiet = Catalogue("YLL", invented.cases, invented.group_order, drilled=False)
+    app.catalogues = app.catalogues + (quiet,)
+    labels = [label for label, _ in HomeScreen(app).items]
+    assert "Drill YLL" not in labels, "a phase that is not drilled got a drill"
+    assert "YLL algorithm library" in labels
 
     picker = PickerScreen(app, mode="select", catalogue=invented)
     assert [case.id for case in picker.order] == ["XLL 1"]
@@ -1253,39 +1282,41 @@ def test_the_picker_shows_all_forty_one_f2l_cases_by_family(app):
 
 
 def test_drilling_a_phase_and_pressing_at_its_boundary_stay_apart(app):
-    """"F2L" names a phase you can drill and a boundary you can press at while
+    """"OLL" names a phase you can drill and a boundary you can press at while
     timing a solve. A rep is a rep and a split is a split, and neither may show
     up in the other's figures."""
-    f2l_catalogue = next(c for c in app.catalogues if c.phase == "F2L")
-    case_id, = first_ids(f2l_catalogue)
-    drill_a_few(app, f2l_catalogue, case_id, count=2)
+    oll_catalogue = next(c for c in app.catalogues if c.phase == "OLL")
+    case_id, = first_ids(oll_catalogue)
+    drill_a_few(app, oll_catalogue, case_id, count=2)
 
     solve = SolveScreen(app, SOLVE_PHASES)
     do_a_solve(solve, app, start=100.0, presses=(102.0, 110.0, 114.0, 118.0))
     key_down(solve, app, pygame.K_ESCAPE)
 
-    assert len(app.store.reps(phase="F2L")) == 2, "a split was counted as a rep"
+    assert len(app.store.reps(phase="OLL")) == 2, "a split was counted as a rep"
     assert len(app.store.solves()) == 1
     assert [s["phase"] for s in app.store.splits()] == list(SOLVE_PHASES)
-    assert app.store.practised_case_ids("F2L") == [case_id], \
+    assert app.store.practised_case_ids("OLL") == [case_id], \
         "a phase split reached the per-case ranking"
 
-    stats = show_phase(StatsScreen(app), app, f2l_catalogue)
+    stats = show_phase(StatsScreen(app), app, oll_catalogue)
     assert [r.case_id for r in stats.reports] == [case_id]
     assert stats.reports[0].attempts == 2
     stats.draw(pygame.Surface((1180, 780)))
 
 
-def test_an_f2l_rep_ends_on_a_solved_cube_like_any_other(app):
-    """Worth checking rather than assuming. A real F2L insert leaves the last
-    layer scrambled, so it would be fair to expect this drill to need a reset
-    afterwards the way a run that stops at the cross does. It does not: the
-    scramble is the inverse of the algorithm, so adjusting the upper face and
-    executing takes the whole cube back to solved -- as true of an F2L case as
-    of an OLL one, and the reason the drill needed no changes at all."""
+def test_f2l_is_read_but_not_drilled(app):
+    """The library serves every phase; the drill serves the ones a scramble can
+    fairly hand out. F2L is the phase where it cannot -- see docs/adr/0004 --
+    so it has algorithms to read and no drill to start."""
     f2l_catalogue = next(c for c in app.catalogues if c.phase == "F2L")
-    for case in f2l_catalogue:
-        drill = DrillScreen(app, [case.id], f2l_catalogue)
-        state = Cube.solved().apply(drill.scramble)
-        assert any(state.apply(auf).apply(case.algorithm).is_solved()
-                   for auf in ("", "U", "U2", "U'")), case.id
+    assert not f2l_catalogue.drilled
+    assert len(f2l_catalogue) == 41
+
+    library = PickerScreen(app, mode="browse", catalogue=f2l_catalogue)
+    assert [case.id for case in library.order] == [c.id for c in f2l_catalogue]
+    library.draw(pygame.Surface((1180, 780)))
+
+    ranked = StatsScreen(app)
+    assert f2l_catalogue not in ranked.catalogues, \
+        "a phase nobody can drill was given a ranking that can only be empty"

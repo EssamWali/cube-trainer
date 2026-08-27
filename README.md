@@ -2,9 +2,8 @@
 
 Targeted scramble generation and timing for practising CFOP on a physical 3x3.
 
-Pick the F2L, OLL or PLL cases you want to work on. The trainer hands you a
-scramble that leaves a solved cube showing exactly one of them, hides which one
-it is,
+Pick the OLL or PLL cases you want to work on. The trainer hands you a scramble
+that leaves a solved cube showing exactly one of them, hides which one it is,
 and times you WCA-style while you recognise and solve it. It records every rep,
 so it can tell you which cases you are actually slow at rather than which
 algorithms happen to be long.
@@ -32,10 +31,10 @@ cube-trainer practice.sqlite3
 
 ## Using it
 
-**Drill PLL**, **Drill OLL** and **Drill F2L** — choose cases, then drill them.
-It is the same screen and the same keys for all three, because it is the same
-drill; only the cases differ. A case set you save belongs to the phase you saved
-it in, so "hard" can mean one thing in PLL and another in F2L.
+**Drill PLL** and **Drill OLL** — choose cases, then drill them. It is the same
+screen and the same keys for both, because it is the same drill; only the cases
+differ. A case set you save belongs to the phase you saved it in, so "hard" can
+mean one thing in PLL and another in OLL.
 
 | key | |
 | --- | --- |
@@ -51,14 +50,8 @@ rather than eighteen. Chosen cases are ringed in green; the cursor is the ring
 inside the tile. Your last selection comes back next time you open the picker.
 
 Cases are grouped the way they are taught — five families for PLL, fifteen for
-OLL, four for F2L — because "I am slow at the fish shapes" is a sentence someone
-says and "I am slow at 9, 10, 35, 37" is not. `g` takes a whole family at once.
-
-F2L is the odd one out. It has no names everybody uses and no one published list
-of algorithms, so its cases are numbered and the ones shipped are the shortest
-solution to each out of the standard triggers — see
-[ADR 0003](docs/adr/0003-f2l-algorithms-are-computed-not-transcribed.md). Set
-your own with `e` in the library.
+OLL — because "I am slow at the fish shapes" is a sentence someone says and "I
+am slow at 9, 10, 35, 37" is not. `g` takes a whole family at once.
 
 In the drill, hold `space` until it turns green, release to start, and press it
 again when the cube is solved. The case is hidden while you work: recognising
@@ -105,6 +98,21 @@ here assumes a solved one too.
 **Algorithm library** — the same grid, browsable, with each case's algorithm,
 one entry per phase.
 
+**F2L is here but is not drilled.** All 41 cases are in the library, drawn as a
+cube seen from a corner, with algorithms to read and learn. There is no F2L
+drill, because a drill hands you a scramble to apply to a solved cube and that
+is not how you meet an F2L case — you meet one with the cross built and pairs
+still scattered, and a nearly-solved cube with one pair out trains the wrong
+recognition. See
+[ADR 0004](docs/adr/0004-f2l-is-read-not-drilled.md). Timing the F2L phase of a
+real solve is unaffected, and is the honest way to measure it.
+
+F2L has no names everybody uses and no one published list of algorithms either,
+so its cases are numbered and the ones shipped are the shortest solution to each
+out of the standard triggers — see
+[ADR 0003](docs/adr/0003-f2l-algorithms-are-computed-not-transcribed.md). Set
+your own with `e`.
+
 Press `e` to replace an algorithm with the one you actually use, and `r` to go
 back to the shipped one. What you type is checked against the cube before it is
 kept: it has to solve the case *and* give the cube back as you picked it up, so
@@ -124,8 +132,9 @@ looked up, or dropped often, and those need different practice. `tab` changes
 which one the ranking uses. The default is seconds per move: ranking by raw
 time mostly tells you which algorithms are long, which you already knew.
 
-One phase at a time, with the arrow keys to switch. An OLL case and a PLL case
-in the same ranking would be two incomparable things in one list.
+One phase at a time, with the arrow keys to switch, over the phases that are
+drilled. An OLL case and a PLL case in the same ranking would be two
+incomparable things in one list.
 
 Above the ranking: your solve count with its mean, ao5 and ao12, and the mean of
 every phase split you have recorded. Only whole solves reach the averages. A

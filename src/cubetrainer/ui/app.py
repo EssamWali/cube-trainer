@@ -95,7 +95,10 @@ class HomeScreen(Screen):
         def picker(catalogue, mode):
             return lambda: PickerScreen(self.app, mode=mode, catalogue=catalogue)
 
-        self.items = [(f"Drill {c.phase}", picker(c, "select")) for c in app.catalogues]
+        # Every phase has a library; only the phases that are drilled have a
+        # drill. Which those are is the catalogue's to say, not this screen's.
+        self.items = [(f"Drill {c.phase}", picker(c, "select"))
+                      for c in app.catalogues if c.drilled]
         self.items += [(f"{c.phase} algorithm library", picker(c, "browse"))
                        for c in app.catalogues]
         self.items.append(("Time a solve", lambda: SolveSetupScreen(self.app)))
@@ -1065,7 +1068,10 @@ class StatsScreen(Screen):
 
     def __init__(self, app, catalogues=None):
         self.app = app
-        self.catalogues = tuple(catalogues or app.catalogues)
+        # Only the phases that are drilled: a ranking of a phase that cannot
+        # be drilled is a page that is empty for a reason nobody can see.
+        self.catalogues = tuple(
+            catalogues or [c for c in app.catalogues if c.drilled])
         self.phase_index = 0
         self.signal = 0
         self.reports = self._build()

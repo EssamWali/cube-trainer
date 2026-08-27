@@ -202,8 +202,11 @@ F2L_CASES = (
          "Corner in, the right way up; edge in but flipped."),
 )
 
-#: The F2L phase, as the screens see it.
-CATALOGUE = Catalogue("F2L", F2L_CASES, GROUP_ORDER)
+#: The F2L phase, as the screens see it. Not drilled: a scramble applied to a
+#: solved cube is not how a cuber meets an F2L case, and the drill's promise is
+#: built on that scramble. The algorithms are here to read and learn from --
+#: see docs/adr/0004.
+CATALOGUE = Catalogue("F2L", F2L_CASES, GROUP_ORDER, drilled=False)
 
 
 def get(case_id):
