@@ -5,6 +5,7 @@ module is how the trainer answers "which case am I looking at" from a state
 alone, which is what lets the case data be checked rather than trusted.
 """
 
+from ..cube.geometry import FACE_BASE, FACE_ORDER, POSITIONS
 from ..cube.state import CENTRES, Cube
 
 CENTRE_U = CENTRES["U"]
@@ -242,3 +243,218 @@ def permutation_order(permutation):
         current = compose(current, permutation)
         order += 1
     return order
+
+
+# --- the first two layers ---------------------------------------------------
+#
+# A last-layer case is about one layer, and the tables above describe it slot by
+# slot. An F2L case is about one corner-edge pair and the slot it belongs in,
+# which is half in the layer those tables describe and half underneath it, so it
+# is read from the geometry the engine is already built on rather than from a
+# second set of hand-written indices.
+
+#: The four slots the first two layers are built from, named for the faces they
+#: sit between. Reading takes one: they are the same cases seen from a different
+#: side of the cube, and a reading that assumed front-right would quietly only
+#: work there.
+F2L_SLOTS = ("FR", "FL", "BL", "BR")
+
+#: Where a piece of the pair is. The four upper-face places are numbered
+#: clockwise from the one above its own slot, so a U turn adds one to each.
+IN_SLOT = 4
+
+#: Which way a piece is turned, said as the direction its anchor sticker faces:
+#: up, down, or one of the four sides, numbered like the places above.
+FACING_UP = 0
+FACING_DOWN = 1
+FACING_SIDE = 2
+
+
+def _cubie_of(index):
+    """The little cube a sticker belongs to.
+
+    A sticker sits on a face plane, three units out; the piece it is stuck to
+    sits two units out. Pulling the one coordinate in is the whole difference,
+    and it is what lets three stickers be recognised as one corner.
+    """
+    return tuple(2 * (c > 0) - 2 * (c < 0) if abs(c) == 3 else c
+                 for c in POSITIONS[index])
+
+
+def _eighth_of(point):
+    """Where a point stands round the vertical axis, in eighths of a turn.
+
+    Corners of a layer land on the odd eighths and edges on the even ones,
+    which is what lets one number order both. A U turn adds two.
+    """
+    x, z = (2 * (v > 0) - 2 * (v < 0) for v in (point[0], point[2]))
+    return {(2, 0): 0, (2, 2): 1, (0, 2): 2, (-2, 2): 3, (-2, 0): 4,
+            (-2, -2): 5, (0, -2): 6, (2, -2): 7}[(x, z)]
+
+
+_STICKERS_ON = {}
+for _index in range(54):
+    _STICKERS_ON.setdefault(_cubie_of(_index), []).append(_index)
+
+_NORMAL_OF = {face: tuple(c // 3 for c in POSITIONS[FACE_BASE[face] + 4])
+              for face in FACE_ORDER}
+
+
+def _cubie_for(faces):
+    """The piece that meets the given faces: a corner for three, an edge for two."""
+    return tuple(2 * sum(_NORMAL_OF[face][axis] for face in faces)
+                 for axis in range(3))
+
+
+_SLOT_PIECES = {
+    slot: (_cubie_for(("D",) + tuple(slot)), _cubie_for(tuple(slot)))
+    for slot in F2L_SLOTS
+}
+
+
+def _place_of(cubie, slot):
+    """Where a piece stands relative to `slot`: a numbered upper-face place,
+    IN_SLOT when it is already home, or None when it is somewhere an F2L case
+    cannot have put it.
+
+    The last is not a formality. Every piece has an angle round the vertical
+    axis, so asking only for the angle answers just as confidently for a piece
+    buried in the slot next door, and the reading would name a case that is not
+    on the cube.
+    """
+    corner, edge = _SLOT_PIECES[slot]
+    if cubie in (corner, edge):
+        return IN_SLOT
+    if cubie[1] != 2:
+        return None
+    return ((_eighth_of(cubie) - _eighth_of(corner) + 1) // 2) % 4
+
+
+def _facing_of(index, slot):
+    """Which way the sticker at `index` faces, relative to `slot`."""
+    normal = _NORMAL_OF[FACE_ORDER[index // 9]]
+    if normal[1] > 0:
+        return FACING_UP
+    if normal[1] < 0:
+        return FACING_DOWN
+    corner, _ = _SLOT_PIECES[slot]
+    turn = ((_eighth_of(normal) - _eighth_of(corner) + 1) // 2) % 4
+    return FACING_SIDE + turn
+
+
+def _anchor_faces(slot):
+    """The colours the pair is read by: the cross colour for the corner, and for
+    the edge whichever of the slot's two faces comes first going clockwise.
+
+    Any consistent choice would do. What matters is that it is the same one at
+    every place a piece can stand, so that "how is this turned" has one answer
+    rather than one per position.
+    """
+    corner, _ = _SLOT_PIECES[slot]
+    first = min(slot, key=lambda face: (_eighth_of(_NORMAL_OF[face])
+                                        - _eighth_of(corner) + 1) % 8)
+    return "D", first
+
+
+def _read_piece(cube, faces, anchor, slot, name):
+    """Where one piece of the pair is and which way it is turned."""
+    face_of = cube.orientation()
+    wanted = frozenset(faces)
+    for cubie, indices in _STICKERS_ON.items():
+        if len(indices) != len(faces):
+            continue
+        if frozenset(face_of[cube.facelets[i]] for i in indices) != wanted:
+            continue
+        place = _place_of(cubie, slot)
+        if place is None:
+            raise ValueError(
+                f"the {slot} {name} is neither in its slot nor in the upper "
+                f"face, so more than this pair is unfinished")
+        found = next(i for i in indices if face_of[cube.facelets[i]] == anchor)
+        return place, _facing_of(found, slot)
+    raise ValueError(f"no piece showing {sorted(wanted)} on this cube")
+
+
+def f2l_pair(cube, slot):
+    """Where `slot`'s pair is and how it is turned.
+
+    Returns ``((corner place, corner facing), (edge place, edge facing))``,
+    every number read relative to the slot, so the same case in the front-left
+    slot reads exactly as it does in the front-right. That is what makes one
+    reading serve all four rather than four readings that drift apart.
+
+    This is position and orientation, and nothing about the last layer. Which
+    OLL case you are about to be left with is not a fact about the F2L case in
+    front of you, and answering it here would answer a question nobody asked.
+    """
+    if slot not in _SLOT_PIECES:
+        raise ValueError(f"no slot named {slot!r}")
+    if not is_canonically_oriented(cube):
+        raise ValueError("the cross is not on the bottom; derotate first")
+    corner_anchor, edge_anchor = _anchor_faces(slot)
+    return (_read_piece(cube, ("D",) + tuple(slot), corner_anchor, slot, "corner"),
+            _read_piece(cube, tuple(slot), edge_anchor, slot, "edge"))
+
+
+def pair_key(cube, slot):
+    """A value equal for two states iff they are the same F2L case.
+
+    The counterpart of `case_key` and `orientation_key`. Read from all four
+    upper-face adjustments and the smallest taken, because turning the top
+    layer changes where the pair stands without changing which case it is --
+    which is what lets a drill hand the case out at a random angle.
+
+    Only the four adjustments, not the sixteen the last-layer readings use: the
+    reading is already relative to a slot, so the cube being held round the
+    other way is already accounted for.
+    """
+    return min(f2l_pair(cube.apply(" ".join(["U"] * turns)), slot)
+               for turns in range(4))
+
+
+def _piece_is_home(cube, faces):
+    """Whether the piece showing `faces` is in its own place, the right way up."""
+    face_of = cube.orientation()
+    return all(face_of[cube.facelets[i]] == FACE_ORDER[i // 9]
+               for i in _STICKERS_ON[_cubie_for(faces)])
+
+
+def is_slot_finished(cube, slot):
+    """Whether `slot` holds its own pair, both pieces the right way round."""
+    return (_piece_is_home(cube, ("D",) + tuple(slot))
+            and _piece_is_home(cube, tuple(slot)))
+
+
+def is_cross_solved(cube):
+    """Whether the cross is built: the bottom centre and its four edges.
+
+    Nothing about the corners, because the cross is the four edges and a cuber
+    who has just finished it is not holding a finished bottom face.
+    """
+    if not is_canonically_oriented(cube):
+        return False
+    return all(_piece_is_home(cube, ("D", face)) for face in "FRBL")
+
+
+def is_f2l_state(cube, slot):
+    """Whether the cube is one pair from finished, and that pair is `slot`'s.
+
+    The precondition for a state to be an F2L case: the cross built, the other
+    three slots done, this one not, and its pair somewhere a cuber can work
+    with -- in the upper face or stuck in its own slot. A pair scattered into
+    another slot is a cube with two slots to fix, which is not a case.
+
+    The last layer is not asked about. It can be anything, and usually is.
+    """
+    if not is_cross_solved(cube):
+        return False
+    if any(not is_slot_finished(cube, other)
+           for other in F2L_SLOTS if other != slot):
+        return False
+    if is_slot_finished(cube, slot):
+        return False
+    try:
+        f2l_pair(cube, slot)
+    except ValueError:
+        return False
+    return True
