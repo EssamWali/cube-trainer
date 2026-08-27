@@ -281,3 +281,39 @@ def test_a_phase_nobody_has_drilled_has_no_practised_cases(store):
     session = store.start_session("drill", "PLL")
     store.record_rep(session, "T", "R U", 2.0)
     assert store.practised_case_ids("OLL") == []
+
+
+def test_penalising_a_solve_amends_the_attempt_it_names(store):
+    session = store.start_session("solve")
+    first = store.record_solve(session, "R U", 20.0, [("Cross", 2.0)])
+    second = store.record_solve(session, "L D", 18.0, [("Cross", 3.0)])
+
+    store.penalise_solve(first, "plus_two")
+    by_id = {row["id"]: row for row in store.solves()}
+    assert by_id[first]["duration_ms"] == 22000
+    assert by_id[first]["penalty"] == "plus_two"
+    assert by_id[second]["duration_ms"] == 18000, "the other solve was touched"
+
+    store.penalise_solve(second, "dnf")
+    by_id = {row["id"]: row for row in store.solves()}
+    assert by_id[second]["duration_ms"] is None
+    assert [s["solve_id"] for s in store.splits()] == [first], \
+        "a DNF keeps splits from an attempt that did not happen"
+
+
+def test_a_penalty_nobody_recognises_is_refused(store):
+    session = store.start_session("solve")
+    solve = store.record_solve(session, "R U", 20.0)
+    with pytest.raises(ValueError):
+        store.penalise_solve(solve, "minus_two")
+
+
+def test_whole_solves_are_the_ones_whose_session_names_no_phase(store):
+    whole = store.start_session("solve")
+    cross = store.start_session("solve", "Cross")
+    store.record_solve(whole, "R U", 20.0, [("Cross", 2.0), ("F2L", 18.0)])
+    store.record_solve(cross, "L D", 3.0, [("Cross", 3.0)])
+
+    assert len(store.solves()) == 2
+    assert [s["session_id"] for s in store.solves(whole_only=True)] == [whole]
+    assert len(store.splits()) == 3, "every attempt keeps its splits"

@@ -101,6 +101,30 @@ class Store:
         self.connection.commit()
         return solve_id
 
+    def penalise_solve(self, solve_id, penalty):
+        """Apply a penalty to a solve already recorded.
+
+        A cuber decides a solve was a +2, or was not a solve at all, after they
+        have stopped the timer. That amends the attempt they just made rather
+        than adding a second one, which is the difference between a penalty and
+        a new record. A DNF takes its splits with it: they are times from an
+        attempt that did not happen.
+        """
+        if penalty == "plus_two":
+            self.connection.execute(
+                "UPDATE solve SET penalty = 'plus_two',"
+                " duration_ms = duration_ms + 2000"
+                " WHERE id = ? AND duration_ms IS NOT NULL", (solve_id,))
+        elif penalty == "dnf":
+            self.connection.execute(
+                "UPDATE solve SET penalty = 'dnf', duration_ms = NULL"
+                " WHERE id = ?", (solve_id,))
+            self.connection.execute(
+                "DELETE FROM phase_split WHERE solve_id = ?", (solve_id,))
+        else:
+            raise ValueError(f"unknown penalty {penalty!r}")
+        self.connection.commit()
+
     # -- reading ----------------------------------------------------------
     def reps(self, case_id=None, session_id=None, phase=None):
         """Stored reps, oldest first.
@@ -126,13 +150,27 @@ class Store:
         sql += " ORDER BY rep.id"
         return [dict(r) for r in self.connection.execute(sql, params)]
 
-    def solves(self, session_id=None):
-        sql = "SELECT * FROM solve"
-        params = []
+    def solves(self, session_id=None, whole_only=False):
+        """Stored solves, oldest first.
+
+        `whole_only` keeps the ones that ran all the way to a solved cube. A
+        session that times only the cross records solves too, because that is
+        what timing only the cross is -- the same attempt with one boundary
+        instead of four -- but averaging a cross time in with whole solves
+        makes the mean a number about nothing. Which it was is the session's
+        phase, null for a whole solve, and this is where that gets asked.
+        """
+        sql = "SELECT solve.* FROM solve"
+        conditions, params = [], []
+        if whole_only:
+            sql += " JOIN session ON session.id = solve.session_id"
+            conditions.append("session.phase IS NULL")
         if session_id is not None:
-            sql += " WHERE session_id = ?"
+            conditions.append("solve.session_id = ?")
             params.append(session_id)
-        sql += " ORDER BY id"
+        if conditions:
+            sql += " WHERE " + " AND ".join(conditions)
+        sql += " ORDER BY solve.id"
         return [dict(r) for r in self.connection.execute(sql, params)]
 
     def splits(self, phase=None):

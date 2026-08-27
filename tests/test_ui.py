@@ -13,7 +13,9 @@ from cubetrainer.cube import Cube
 from cubetrainer.store import Store
 from cubetrainer.trainer.timer import TimerState
 from cubetrainer.ui import render
-from cubetrainer.ui.app import App, DrillScreen, HomeScreen, PickerScreen, StatsScreen
+from cubetrainer.ui.app import (SOLVE_PHASES, App, DrillScreen, HomeScreen,
+                               PickerScreen, SolveScreen, SolveSetupScreen,
+                               StatsScreen, solve_split_labels)
 from cubetrainer.ui.theme import ACCENT, READY
 
 
@@ -80,7 +82,8 @@ def test_every_screen_draws_without_error(app):
     picker = PickerScreen(app, mode="select")
     drill = DrillScreen(app, ["T", "Ja"])
     for screen in (HomeScreen(app), picker, PickerScreen(app, mode="browse"),
-                   drill, StatsScreen(app)):
+                   drill, SolveSetupScreen(app), SolveScreen(app),
+                   StatsScreen(app)):
         screen.draw(surface)
 
 
@@ -431,6 +434,8 @@ def test_every_screen_of_every_phase_draws_without_error(app, catalogue):
         PickerScreen(app, mode="select", catalogue=catalogue),
         PickerScreen(app, mode="browse", catalogue=catalogue),
         DrillScreen(app, first_ids(catalogue, 2), catalogue),
+        SolveSetupScreen(app),
+        SolveScreen(app),
         StatsScreen(app),
     ]
     for screen in screens:
@@ -654,3 +659,269 @@ def test_up_and_down_move_between_families(app):
     assert below.centery > start.centery
     key_down(picker, app, pygame.K_UP)
     assert picker.rect_for(picker.current).centery == start.centery
+
+
+# --- timing a solve ---------------------------------------------------------
+
+def do_a_solve(solve, application, start=0.0, presses=()):
+    """Arm, start, and press at each boundary the way a cuber would."""
+    key_down(solve, application, pygame.K_SPACE, now=start)
+    solve.update(start + 0.7)
+    key_up(solve, application, pygame.K_SPACE, now=start + 0.7)
+    assert solve.timer.state is TimerState.RUNNING
+    for at in presses:
+        key_down(solve, application, pygame.K_SPACE, now=at)
+
+
+def test_the_home_screen_offers_timing_a_solve(app):
+    home = HomeScreen(app)
+    labels = [label for label, _ in home.items]
+    assert "Time a solve" in labels
+    result = key_down(app, app, pygame.K_1) if False else key_down(
+        home, app, pygame.K_1 + labels.index("Time a solve"))
+    assert isinstance(result, SolveSetupScreen)
+
+
+def test_a_run_with_no_boundary_cannot_start(app):
+    """A timer with nothing to stop at would never stop. Same rule as a drill
+    with no cases chosen."""
+    setup = SolveSetupScreen(app, phases=())
+    assert key_down(setup, app, pygame.K_RETURN) is None
+    key_down(setup, app, pygame.K_SPACE)  # tick whatever the cursor is on
+    assert isinstance(key_down(setup, app, pygame.K_RETURN), SolveScreen)
+
+
+def test_the_boundaries_are_ticked_and_untickable(app):
+    setup = SolveSetupScreen(app, phases=())
+    key_down(setup, app, pygame.K_a)
+    assert setup.ticked == SOLVE_PHASES
+    key_down(setup, app, pygame.K_SPACE)
+    assert SOLVE_PHASES[0] not in setup.ticked
+    assert setup.inspection is True
+    key_down(setup, app, pygame.K_i)
+    assert setup.inspection is False
+
+
+def test_a_phase_with_no_boundary_is_named_in_the_split_that_covers_it():
+    """Calling the second press of a Cross-and-PLL run "PLL" would file three
+    phases of work under the name of one, and the statistics read these
+    labels."""
+    assert solve_split_labels(SOLVE_PHASES) == SOLVE_PHASES
+    assert solve_split_labels({"Cross", "PLL"}) == ("Cross", "F2L+OLL+PLL")
+    assert solve_split_labels({"OLL"}) == ("Cross+F2L+OLL",)
+    assert solve_split_labels({"Cross"}) == ("Cross",)
+
+
+def test_each_press_closes_a_phase_and_the_last_one_stops_the_timer(app):
+    solve = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(solve, app, presses=(2.0, 10.0))
+    assert solve.timer.state is TimerState.RUNNING
+    assert len(solve.timer.splits()) == 2
+    key_down(solve, app, pygame.K_SPACE, now=14.0)
+    key_down(solve, app, pygame.K_SPACE, now=18.0)
+    assert solve.timer.is_finished
+
+
+def test_timing_only_the_cross_stops_at_the_cross(app):
+    """The same screen and the same timer, with one boundary instead of four."""
+    solve = SolveScreen(app, ("Cross",))
+    assert solve.labels == ("Cross",)
+    do_a_solve(solve, app, presses=(3.0,))
+    assert solve.timer.is_finished
+    recorded, = app.store.solves()
+    assert recorded["duration_ms"] == pytest.approx(2300, abs=2)
+
+
+def test_a_solve_is_recorded_with_its_scramble_total_and_splits(app):
+    solve = SolveScreen(app, SOLVE_PHASES)
+    scramble = solve.scramble
+    do_a_solve(solve, app, presses=(2.0, 10.0, 14.0, 18.0))
+    recorded, = app.store.solves()
+    assert recorded["scramble"] == scramble
+    assert recorded["duration_ms"] == pytest.approx(17300, abs=2)
+    splits = app.store.splits()
+    assert [s["phase"] for s in splits] == list(SOLVE_PHASES)
+    assert [s["duration_ms"] for s in splits] == [
+        pytest.approx(1300, abs=2), pytest.approx(8000, abs=2),
+        pytest.approx(4000, abs=2), pytest.approx(4000, abs=2)]
+
+
+def test_the_scramble_never_asks_the_cuber_to_rotate_the_cube(app):
+    solve = SolveScreen(app, SOLVE_PHASES)
+    for _ in range(20):
+        assert all(move[0] in "RULFDB" for move in solve.scramble.split())
+        solve._next_scramble()
+
+
+def test_a_session_of_solves_is_tagged_as_such(app):
+    whole = SolveScreen(app, SOLVE_PHASES)
+    cross = SolveScreen(app, ("Cross",))
+    sessions = {s["id"]: s for s in app.store.sessions()}
+    assert sessions[whole.session]["kind"] == "solve"
+    assert sessions[whole.session]["phase"] is None, "a whole solve is not one phase"
+    assert sessions[cross.session]["phase"] == "Cross"
+
+
+def test_inspection_counts_down_and_its_overrun_reaches_the_record(app):
+    solve = SolveScreen(app, ("Cross",), inspection=True)
+    key_down(solve, app, pygame.K_i, now=0.0)
+    assert solve.timer.state is TimerState.INSPECTING
+    key_down(solve, app, pygame.K_SPACE, now=16.0)
+    solve.update(16.7)
+    key_up(solve, app, pygame.K_SPACE, now=16.7)
+    assert solve.timer.state is TimerState.RUNNING
+    key_down(solve, app, pygame.K_SPACE, now=20.0)
+    recorded, = app.store.solves()
+    assert recorded["penalty"] == "plus_two"
+    assert recorded["duration_ms"] == pytest.approx(5300, abs=2)
+
+
+def test_an_inspection_over_seventeen_seconds_is_a_dnf(app):
+    solve = SolveScreen(app, ("Cross",), inspection=True)
+    key_down(solve, app, pygame.K_i, now=0.0)
+    key_down(solve, app, pygame.K_SPACE, now=18.0)
+    solve.update(18.7)
+    key_up(solve, app, pygame.K_SPACE, now=18.7)
+    key_down(solve, app, pygame.K_SPACE, now=22.0)
+    recorded, = app.store.solves()
+    assert recorded["penalty"] == "dnf"
+    assert recorded["duration_ms"] is None
+
+
+def test_releasing_early_during_inspection_goes_back_to_inspecting(app):
+    """The same guard the drill has, except that giving up an arm mid-inspection
+    must not hand back the inspection time already spent."""
+    solve = SolveScreen(app, ("Cross",), inspection=True)
+    key_down(solve, app, pygame.K_i, now=0.0)
+    key_down(solve, app, pygame.K_SPACE, now=3.0)
+    key_up(solve, app, pygame.K_SPACE, now=3.2)
+    assert solve.timer.state is TimerState.INSPECTING
+    assert solve.timer.inspection_elapsed(3.2) == pytest.approx(3.2)
+
+
+def test_a_whole_solve_goes_straight_on_but_a_part_solve_asks_for_a_reset(app):
+    """Every scramble here assumes a solved cube. A whole solve ends on one; a
+    run that stopped at the cross did not."""
+    whole = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(whole, app, presses=(2.0, 10.0, 14.0, 18.0))
+    assert whole.stage == "result"
+
+    cross = SolveScreen(app, ("Cross",))
+    do_a_solve(cross, app, start=30.0, presses=(33.0,))
+    assert cross.stage == "reset"
+    key_down(cross, app, pygame.K_SPACE)
+    assert cross.stage == "scramble"
+
+
+def test_a_plus_two_updates_the_recorded_total(app):
+    solve = SolveScreen(app, ("Cross",))
+    do_a_solve(solve, app, presses=(3.0,))
+    before, = app.store.solves()
+    key_down(solve, app, pygame.K_2)
+    after, = app.store.solves()
+    assert after["penalty"] == "plus_two"
+    assert after["duration_ms"] == before["duration_ms"] + 2000
+
+
+def test_a_fumble_is_recorded_as_a_dnf_with_no_time_and_no_splits(app):
+    solve = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(solve, app, presses=(2.0, 10.0))
+    key_down(solve, app, pygame.K_d)
+    recorded, = app.store.solves()
+    assert recorded["penalty"] == "dnf"
+    assert recorded["duration_ms"] is None
+    assert app.store.splits() == [], "a fumbled attempt has no times in it"
+    assert solve.stage == "reset"
+
+
+def test_leaving_a_run_of_solves_closes_its_session(app):
+    solve = SolveScreen(app, SOLVE_PHASES)
+    assert key_down(solve, app, pygame.K_ESCAPE) == "back"
+    session, = [s for s in app.store.sessions() if s["id"] == solve.session]
+    assert session["ended_at"] is not None
+
+
+def test_only_whole_solves_reach_the_solve_average(app):
+    """A cross time and a solve time are both times, and one average over both
+    is a number about nothing. The phase splits keep every attempt, because
+    there they are filed under what they actually measured."""
+    whole = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(whole, app, presses=(2.0, 10.0, 14.0, 18.0))
+    key_down(whole, app, pygame.K_ESCAPE)
+
+    cross = SolveScreen(app, ("Cross",))
+    do_a_solve(cross, app, start=30.0, presses=(33.0,))
+    key_down(cross, app, pygame.K_ESCAPE)
+
+    assert len(app.store.solves()) == 2
+    assert len(app.store.solves(whole_only=True)) == 1
+    assert len(app.store.splits()) == 5
+
+
+def test_a_solve_contributes_no_reps_and_no_case(app):
+    """Which OLL and which PLL came up depends on how the cuber built their
+    F2L, which the application never sees. So a solve may not put anything
+    into a per-case ranking."""
+    solve = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(solve, app, presses=(2.0, 10.0, 14.0, 18.0))
+    key_down(solve, app, pygame.K_ESCAPE)
+    assert app.store.reps() == []
+    assert app.store.practised_case_ids() == []
+    for catalogue in app.catalogues:
+        stats = show_phase(StatsScreen(app), app, catalogue)
+        assert stats.reports == []
+        stats.draw(pygame.Surface((1180, 780)))
+
+
+def test_the_statistics_show_what_a_run_of_solves_recorded(app):
+    """The solve summary and the phase-split line had nothing to draw before
+    there was a screen that recorded a solve."""
+    solve = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(solve, app, presses=(2.0, 10.0, 14.0, 18.0))
+    key_down(solve, app, pygame.K_ESCAPE)
+
+    surface = pygame.Surface((1180, 780))
+    band = pygame.Rect(0, 80, 1180, 64)
+
+    def summary_band(application):
+        surface.fill((0, 0, 0))
+        StatsScreen(application).draw(surface)
+        return pygame.image.tostring(surface.subsurface(band), "RGB")
+
+    with_solve = summary_band(app)
+    empty = App(store=Store.in_memory(), seed=1)
+    assert with_solve != summary_band(empty), "the solve reached nothing on screen"
+
+
+def test_every_stage_of_a_run_of_solves_draws(app):
+    surface = pygame.Surface((1180, 780))
+    solve = SolveScreen(app, SOLVE_PHASES)
+    solve.draw(surface)
+    key_down(solve, app, pygame.K_i, now=0.0)
+    solve.draw(surface)
+    do_a_solve(solve, app, start=2.0, presses=(6.0, 10.0))
+    solve.draw(surface)
+    key_down(solve, app, pygame.K_SPACE, now=14.0)
+    key_down(solve, app, pygame.K_SPACE, now=18.0)
+    solve.draw(surface)
+    key_down(solve, app, pygame.K_d)
+    solve.draw(surface)
+
+
+def test_discarding_a_finished_attempt_amends_it_rather_than_adding_one(app):
+    """Pressing d on a time you have already stopped says that attempt was not
+    a solve. It does not say there was a second attempt that was not one."""
+    solve = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(solve, app, presses=(2.0, 10.0, 14.0, 18.0))
+    assert len(app.store.solves()) == 1
+
+    key_down(solve, app, pygame.K_d)
+    recorded, = app.store.solves()
+    assert recorded["penalty"] == "dnf"
+    assert recorded["duration_ms"] is None
+    assert app.store.splits() == [], "a DNF takes its splits with it"
+    assert solve.dnfs == 1 and solve.times == []
+
+    key_down(solve, app, pygame.K_d)
+    assert len(app.store.solves()) == 1, "discarding twice discarded twice"
+    assert solve.dnfs == 1

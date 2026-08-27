@@ -1,4 +1,4 @@
-"""The pygame application: menu, case picker, drill loop and statistics.
+"""The pygame application: menu, case picker, drill loop, solves and statistics.
 
 Screens are a stack. The picker and the algorithm library are the same screen
 in two modes, because they show identical content and differ only in whether
@@ -16,7 +16,7 @@ from ..cube.notation import move_count
 from ..store import Store
 from ..store.stats import case_report, phase_summary, rank_by_weakness, solve_summary
 from ..trainer.sampler import RoundRobinSampler
-from ..trainer.scramble import scramble_for
+from ..trainer.scramble import random_scramble, scramble_for
 from ..trainer.timer import Penalty, SolveTimer, TimerState
 from . import render, theme
 from .theme import ACCENT, ARMED, BACKGROUND, DANGER, PANEL, READY, TEXT, TEXT_DIM
@@ -27,6 +27,33 @@ LAST_USED = "__last used__"
 
 MARGIN = 40
 HELP_LINE = WINDOW[1] - 30
+
+
+#: The phases of a solve, in the order they happen. A cuber ticks whichever of
+#: these they want the timer to stop at; CONTEXT.md calls that multi-phase
+#: timing, and calls timing only the cross the same thing with one boundary.
+SOLVE_PHASES = ("Cross", "F2L", "OLL", "PLL")
+
+
+def solve_split_labels(chosen):
+    """What each press of the timer closes, given the boundaries ticked.
+
+    A phase nobody asked for a boundary at does not disappear: it is still
+    being solved, so it is folded into the next split and named there. Tick
+    Cross and PLL and the second press closes "F2L+OLL+PLL", because that is
+    honestly what it covers -- calling it "PLL" would file three phases of work
+    under the name of one, and the statistics read these labels.
+
+    Anything after the last boundary is dropped, because that is where the
+    attempt ends.
+    """
+    labels, run = [], []
+    for phase in SOLVE_PHASES:
+        run.append(phase)
+        if phase in chosen:
+            labels.append("+".join(run))
+            run = []
+    return tuple(labels)
 
 
 def algorithm_for(case, overrides):
@@ -65,6 +92,7 @@ class HomeScreen(Screen):
         self.items = [(f"Drill {c.phase}", picker(c, "select")) for c in app.catalogues]
         self.items += [(f"{c.phase} algorithm library", picker(c, "browse"))
                        for c in app.catalogues]
+        self.items.append(("Time a solve", lambda: SolveSetupScreen(self.app)))
         self.items.append(("Statistics", lambda: StatsScreen(self.app)))
 
     def handle(self, event):
@@ -570,6 +598,321 @@ class DrillScreen(Screen):
 
 
 # --------------------------------------------------------------------------
+class SolveSetupScreen(Screen):
+    """Which boundaries a run of solves will tick, and whether to inspect.
+
+    A cuber timing a whole solve and a cuber timing only their cross are doing
+    the same thing with a different number of boundaries, so they get the same
+    screen and the same timer rather than two that drift apart.
+    """
+
+    def __init__(self, app, phases=None, inspection=True):
+        self.app = app
+        self.chosen = set(SOLVE_PHASES if phases is None else phases)
+        self.inspection = inspection
+        self.cursor = 0
+
+    @property
+    def ticked(self):
+        """The boundaries in the order they happen, whatever order they were
+        ticked in."""
+        return tuple(phase for phase in SOLVE_PHASES if phase in self.chosen)
+
+    @property
+    def labels(self):
+        return solve_split_labels(self.chosen)
+
+    def handle(self, event):
+        if event.type != pygame.KEYDOWN:
+            return None
+        key = event.key
+        if key == pygame.K_ESCAPE:
+            return "back"
+        if key in (pygame.K_DOWN, pygame.K_j):
+            self.cursor = (self.cursor + 1) % len(SOLVE_PHASES)
+        elif key in (pygame.K_UP, pygame.K_k):
+            self.cursor = (self.cursor - 1) % len(SOLVE_PHASES)
+        elif key == pygame.K_SPACE:
+            self.chosen.symmetric_difference_update({SOLVE_PHASES[self.cursor]})
+        elif key == pygame.K_a:
+            self.chosen = set(SOLVE_PHASES)
+        elif key == pygame.K_i:
+            self.inspection = not self.inspection
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            # A run with no boundary would never stop, so there is nothing to
+            # start. Same rule as a drill with no cases.
+            if self.ticked:
+                return SolveScreen(self.app, self.ticked, self.inspection)
+        return None
+
+    def draw(self, surface):
+        surface.fill(BACKGROUND)
+        theme.text(surface, "Time a solve", (MARGIN, 28), 30, TEXT, True)
+        theme.text(surface, "tick the boundaries you want to press at",
+                   (MARGIN, 74), 19, TEXT_DIM)
+
+        labels = list(self.labels)
+        top = 130
+        for index, phase in enumerate(SOLVE_PHASES):
+            here = index == self.cursor
+            on = phase in self.chosen
+            colour = ACCENT if here else (TEXT if on else TEXT_DIM)
+            mark = "x" if on else " "
+            theme.text(surface, f"{'>' if here else ' '} [{mark}] {phase}",
+                       (MARGIN + 20, top), 26, colour, here)
+            if on and labels:
+                theme.text(surface, f"press {len(SOLVE_PHASES) - len(labels) + 1}"
+                           f" closes {labels.pop(0)}",
+                           (MARGIN + 260, top + 4), 18, TEXT_DIM)
+            top += 44
+
+        top += 20
+        state = "on" if self.inspection else "off"
+        theme.text(surface, f"inspection: {state}   (i)", (MARGIN + 20, top), 22,
+                   TEXT if self.inspection else TEXT_DIM)
+        top += 40
+        if self.ticked:
+            ends = "a whole solve" if SOLVE_PHASES[-1] in self.chosen else (
+                f"stops after {self.ticked[-1]}, so your cube is left part solved")
+            theme.text(surface, ends, (MARGIN + 20, top), 19, TEXT_DIM)
+        else:
+            theme.text(surface, "tick at least one boundary to start",
+                       (MARGIN + 20, top), 19, DANGER)
+
+        theme.text(surface, "space ticks   a all   i inspection   enter starts"
+                   "   esc back", (WINDOW[0] // 2, HELP_LINE), 16, TEXT_DIM,
+                   centre=True)
+
+
+# --------------------------------------------------------------------------
+class SolveScreen(Screen):
+    """A run of solves, split at whichever boundaries were chosen.
+
+    A solve has no case. Which OLL and which PLL come up depends on how the
+    cuber chose to build their F2L, which this application never sees, so
+    nothing here claims to know what was solved -- only how long each stretch
+    of it took.
+    """
+
+    def __init__(self, app, phases=SOLVE_PHASES, inspection=True):
+        self.app = app
+        self.phases = tuple(phases)
+        self.labels = solve_split_labels(self.phases)
+        self.whole = SOLVE_PHASES[-1] in self.phases
+        # A whole solve is a solve of the cube and its session says so by
+        # naming no phase. One that stops early is a phase being drilled, and
+        # the statistics need to be able to tell them apart before averaging.
+        self.session = app.store.start_session(
+            "solve", None if self.whole else self.phases[-1])
+        self.inspection = inspection
+        self.timer = SolveTimer(phases=self.labels, inspection=inspection)
+        self.scramble = ""
+        self.stage = "scramble"
+        self.last_time = None
+        self.last_splits = ()
+        self.times = []
+        self.dnfs = 0
+        self._next_scramble()
+
+    def _next_scramble(self):
+        self.scramble = random_scramble(self.app.rng)
+        self.timer.reset()
+        self.stage = "scramble"
+
+    def _record(self, penalty=None):
+        penalty = penalty or self.timer.penalty.value
+        seconds = self.timer.total()
+        # A fumbled attempt has splits for the phases it got through, and they
+        # are not times: the attempt they belong to did not happen.
+        splits = () if penalty == "dnf" else tuple(zip(self.labels,
+                                                       self.timer.splits()))
+        self.app.store.record_solve(self.session, self.scramble, seconds,
+                                    splits, penalty=penalty)
+        self.last_splits = splits
+        if penalty == "dnf":
+            self.last_time = None
+            self.dnfs += 1
+        else:
+            self.last_time = seconds
+            self.times.append(seconds)
+
+    def _penalise(self, penalty):
+        """Amend the attempt just recorded, rather than adding another one.
+
+        The cuber has stopped the timer and is looking at the time. Saying it
+        was a +2, or was not a solve at all, is a fact about that attempt.
+        """
+        rows = self.app.store.solves(session_id=self.session)
+        if not rows or rows[-1]["penalty"] == "dnf":
+            return
+        last = rows[-1]
+        self.app.store.penalise_solve(last["id"], penalty)
+        if penalty == "dnf":
+            if self.last_time is not None and self.times:
+                self.times.pop()
+            self.last_time = None
+            self.last_splits = ()
+            self.dnfs += 1
+        elif last["duration_ms"] is not None:
+            self.last_time = (last["duration_ms"] + 2000) / 1000.0
+            if self.times:
+                self.times[-1] = self.last_time
+
+    def handle(self, event):
+        if event.type == pygame.KEYUP and event.key == pygame.K_SPACE:
+            if self.stage == "scramble":
+                # Read the penalty before the release, because releasing is
+                # what ends inspection and the clock it is measured against.
+                overrun = self.timer.inspection_penalty(self.app.now)
+                self.timer.release(self.app.now)
+                if self.timer.state is TimerState.RUNNING:
+                    self.timer.penalty = overrun
+            return None
+        if event.type != pygame.KEYDOWN:
+            return None
+        return self._key_down(event)
+
+    def _key_down(self, event):
+        key = event.key
+        if key == pygame.K_ESCAPE:
+            self.app.store.end_session(self.session)
+            return "back"
+        if key == pygame.K_i and self.stage == "scramble":
+            self.timer.begin_inspection(self.app.now)
+            return None
+        if key == pygame.K_d:
+            if self.stage == "scramble":
+                # Abandoned part way: there is nothing recorded yet to amend.
+                self._record(penalty="dnf")
+            else:
+                self._penalise("dnf")
+            self.stage = "reset"
+            return None
+        if key == pygame.K_2 and self.last_time is not None and \
+                self.stage in ("result", "reset"):
+            # "reset" is where a run that stops before the cube is solved ends
+            # up, and a cross time can be a +2 like any other.
+            self._penalise("plus_two")
+            return None
+        if key == pygame.K_SPACE:
+            if self.stage in ("result", "reset"):
+                self._next_scramble()
+            else:
+                self.timer.press(self.app.now)
+                if self.timer.is_finished:
+                    self._record()
+                    # A whole solve ends on a solved cube and the next scramble
+                    # can go straight on. A run that stopped early did not, so
+                    # the cuber has to finish it first -- every scramble here
+                    # assumes a solved cube.
+                    self.stage = "result" if self.whole else "reset"
+            return None
+        return None
+
+    def update(self, now):
+        if self.stage == "scramble":
+            self.timer.tick(now)
+
+    def draw(self, surface):
+        surface.fill(BACKGROUND)
+        running = self.timer.state is TimerState.RUNNING
+        heading = "solve" if self.whole else f"{self.phases[-1]} drill"
+        theme.text(surface, f"{heading}   {'  '.join(self.labels)}",
+                   (MARGIN, 28), 20, TEXT_DIM)
+        self._draw_session_line(surface)
+
+        if not running:
+            theme.text(surface, self.scramble, (WINDOW[0] // 2, 104), 24, TEXT,
+                       True, centre=True)
+            theme.text(surface, "apply this to a solved cube",
+                       (WINDOW[0] // 2, 142), 17, TEXT_DIM, centre=True)
+
+        self._draw_timer(surface)
+        self._draw_splits(surface)
+        self._draw_help(surface)
+
+    def _draw_session_line(self, surface):
+        done = len(self.times) + self.dnfs
+        noun = "solve" if self.whole else "attempt"
+        summary = f"{done} {noun}" + ("" if done == 1 else "s")
+        if self.times:
+            summary += f"   best {theme.format_time(min(self.times))}"
+            summary += f"   mean {theme.format_time(sum(self.times) / len(self.times))}"
+        if self.dnfs:
+            summary += f"   {self.dnfs} DNF"
+        theme.text(surface, summary, (WINDOW[0] - MARGIN, 30), 19, TEXT_DIM,
+                   right=True)
+
+    def _draw_timer(self, surface):
+        state = self.timer.state
+        colour, label = TEXT, None
+        if self.stage == "reset":
+            colour = DANGER if self.last_time is None else TEXT
+            reading = theme.format_time(self.last_time)
+            label = "solve your cube, then press space"
+        elif self.stage == "result":
+            reading = theme.format_time(self.last_time)
+            colour = DANGER if self.last_time is None else READY
+            label = "space for the next scramble"
+        elif state is TimerState.INSPECTING:
+            used = self.timer.inspection_elapsed(self.app.now)
+            left = self.timer.inspection_seconds - used
+            over = self.timer.inspection_penalty(self.app.now)
+            colour = TEXT if over is Penalty.NONE else DANGER
+            reading = f"{max(0.0, left):.0f}"
+            label = ("inspecting" if over is Penalty.NONE
+                     else f"inspection {over.value.replace('_', ' ')}")
+        elif state is TimerState.ARMING:
+            colour, reading, label = ARMED, "0.00", "keep holding"
+        elif state is TimerState.READY:
+            colour, reading, label = READY, "0.00", "release to start"
+        elif state is TimerState.RUNNING:
+            colour = TEXT
+            reading = theme.format_time(self.timer.elapsed(self.app.now))
+            done = len(self.timer.splits())
+            label = f"next press closes {self.labels[done]}"
+        else:
+            colour, reading = TEXT_DIM, "0.00"
+            label = ("i to inspect, or hold space to arm" if self.inspection
+                     else "hold space to arm")
+        theme.text(surface, reading, (WINDOW[0] // 2, 200), 96, colour, True,
+                   centre=True)
+        if label:
+            theme.text(surface, label, (WINDOW[0] // 2, 310), 20, colour,
+                       centre=True)
+
+    def _draw_splits(self, surface):
+        """The splits of the attempt on screen, or the one just finished."""
+        if self.timer.state is TimerState.RUNNING:
+            shown = list(zip(self.labels, self.timer.splits()))
+        elif self.stage in ("result", "reset"):
+            shown = list(self.last_splits)
+        else:
+            return
+        top = 380
+        for label, seconds in shown:
+            theme.text(surface, label, (WINDOW[0] // 2 - 150, top), 22, TEXT_DIM)
+            theme.text(surface, theme.format_time(seconds),
+                       (WINDOW[0] // 2 + 150, top), 22, TEXT, right=True)
+            top += 32
+
+    def _draw_help(self, surface):
+        if self.stage == "reset":
+            hint = ("space when your cube is solved again   2 penalty"
+                    "   d discard as DNF   esc end session")
+        elif self.stage == "result":
+            hint = "space next scramble   2 penalty   d discard as DNF   esc end session"
+        elif self.timer.state is TimerState.RUNNING:
+            hint = "space closes each phase   d fumbled   esc end session"
+        elif self.inspection:
+            hint = "i inspect   hold space to start   d fumbled   esc end session"
+        else:
+            hint = "hold space to start   d fumbled   esc end session"
+        theme.text(surface, hint, (WINDOW[0] // 2, HELP_LINE), 16, TEXT_DIM,
+                   centre=True)
+
+
+# --------------------------------------------------------------------------
 class StatsScreen(Screen):
     """Weak spots as several signals, never as one score.
 
@@ -641,7 +984,7 @@ class StatsScreen(Screen):
         theme.text(surface, f"sorted by {label}  (tab to change)",
                    (WINDOW[0] - 40, 36), 19, ACCENT, right=True)
 
-        solves = self.app.store.solves()
+        solves = self.app.store.solves(whole_only=True)
         splits = self.app.store.splits()
         top = 84
         if solves:
