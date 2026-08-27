@@ -35,6 +35,12 @@ HELP_LINE = WINDOW[1] - 30
 SOLVE_PHASES = ("Cross", "F2L", "OLL", "PLL")
 
 
+#: Ticking nothing but the last boundary: one press, at the end. A whole solve
+#: timed the way a timer times it, which is what most people want most of the
+#: time, so it is what the screen starts on.
+WHOLE_SOLVE = (SOLVE_PHASES[-1],)
+
+
 def solve_split_labels(chosen):
     """What each press of the timer closes, given the boundaries ticked.
 
@@ -703,7 +709,7 @@ class SolveSetupScreen(Screen):
 
     def __init__(self, app, phases=None, inspection=True):
         self.app = app
-        self.chosen = set(SOLVE_PHASES if phases is None else phases)
+        self.chosen = set(WHOLE_SOLVE if phases is None else phases)
         self.inspection = inspection
         self.cursor = 0
 
@@ -716,6 +722,28 @@ class SolveSetupScreen(Screen):
     @property
     def labels(self):
         return solve_split_labels(self.chosen)
+
+    @property
+    def in_one_go(self):
+        """Whether this is a whole solve with nothing to press at on the way."""
+        return len(self.labels) == 1 and SOLVE_PHASES[-1] in self.chosen
+
+    @property
+    def summary(self):
+        """What the run will actually ask of the cuber, in plain words.
+
+        The ticks say what will be timed; this says what your hands will do,
+        which is the thing you want to know before you pick up the cube.
+        """
+        if not self.ticked:
+            return "tick at least one boundary to start"
+        if self.in_one_go:
+            return "one press at the end: the whole solve, timed in one go"
+        presses = len(self.labels)
+        if SOLVE_PHASES[-1] in self.chosen:
+            return f"{presses} presses: a whole solve, split {presses} ways"
+        return (f"{presses} press{'es' if presses > 1 else ''}: stops after "
+                f"{self.ticked[-1]}, so your cube is left part solved")
 
     def handle(self, event):
         if event.type != pygame.KEYDOWN:
@@ -731,6 +759,10 @@ class SolveSetupScreen(Screen):
             self.chosen.symmetric_difference_update({SOLVE_PHASES[self.cursor]})
         elif key == pygame.K_a:
             self.chosen = set(SOLVE_PHASES)
+        elif key == pygame.K_n:
+            # Not "nothing ticked" -- a run with no boundary would never stop.
+            # No boundary on the way, which is the plain timer.
+            self.chosen = set(WHOLE_SOLVE)
         elif key == pygame.K_i:
             self.inspection = not self.inspection
         elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
@@ -743,7 +775,8 @@ class SolveSetupScreen(Screen):
     def draw(self, surface):
         surface.fill(BACKGROUND)
         theme.text(surface, "Time a solve", (MARGIN, 28), 30, TEXT, True)
-        theme.text(surface, "tick the boundaries you want to press at",
+        theme.text(surface, "tick the boundaries you want to press at, or "
+                   "leave it as it is to time the whole solve in one go",
                    (MARGIN, 74), 19, TEXT_DIM)
 
         labels = list(self.labels)
@@ -756,9 +789,10 @@ class SolveSetupScreen(Screen):
             theme.text(surface, f"{'>' if here else ' '} [{mark}] {phase}",
                        (MARGIN + 20, top), 26, colour, here)
             if on and labels:
-                theme.text(surface, f"press {len(SOLVE_PHASES) - len(labels) + 1}"
-                           f" closes {labels.pop(0)}",
-                           (MARGIN + 260, top + 4), 18, TEXT_DIM)
+                closes = labels.pop(0)
+                said = ("the whole solve, in one press" if self.in_one_go else
+                        f"press {len(SOLVE_PHASES) - len(labels)} closes {closes}")
+                theme.text(surface, said, (MARGIN + 260, top + 4), 18, TEXT_DIM)
             top += 44
 
         top += 20
@@ -766,17 +800,12 @@ class SolveSetupScreen(Screen):
         theme.text(surface, f"inspection: {state}   (i)", (MARGIN + 20, top), 22,
                    TEXT if self.inspection else TEXT_DIM)
         top += 40
-        if self.ticked:
-            ends = "a whole solve" if SOLVE_PHASES[-1] in self.chosen else (
-                f"stops after {self.ticked[-1]}, so your cube is left part solved")
-            theme.text(surface, ends, (MARGIN + 20, top), 19, TEXT_DIM)
-        else:
-            theme.text(surface, "tick at least one boundary to start",
-                       (MARGIN + 20, top), 19, DANGER)
+        theme.text(surface, self.summary, (MARGIN + 20, top), 19,
+                   TEXT_DIM if self.ticked else DANGER)
 
-        theme.text(surface, "space ticks   a all   i inspection   enter starts"
-                   "   esc back", (WINDOW[0] // 2, HELP_LINE), 16, TEXT_DIM,
-                   centre=True)
+        theme.text(surface, "space ticks   a every phase   n none on the way"
+                   "   i inspection   enter starts   esc back",
+                   (WINDOW[0] // 2, HELP_LINE), 16, TEXT_DIM, centre=True)
 
 
 # --------------------------------------------------------------------------
@@ -799,6 +828,10 @@ class SolveScreen(Screen):
         # the statistics need to be able to tell them apart before averaging.
         self.session = app.store.start_session(
             "solve", None if self.whole else self.phases[-1])
+        # A single split covering the whole solve is the solve's own time
+        # written down a second time, and it would put a phase in the phase
+        # means whose mean is just the solve mean.
+        self.in_one_go = self.whole and len(self.labels) == 1
         self.inspection = inspection
         self.timer = SolveTimer(phases=self.labels, inspection=inspection)
         self.scramble = ""
@@ -819,8 +852,8 @@ class SolveScreen(Screen):
         seconds = self.timer.total()
         # A fumbled attempt has splits for the phases it got through, and they
         # are not times: the attempt they belong to did not happen.
-        splits = () if penalty == "dnf" else tuple(zip(self.labels,
-                                                       self.timer.splits()))
+        splits = (() if penalty == "dnf" or self.in_one_go
+                  else tuple(zip(self.labels, self.timer.splits())))
         self.app.store.record_solve(self.session, self.scramble, seconds,
                                     splits, penalty=penalty)
         self.last_splits = splits
@@ -912,8 +945,9 @@ class SolveScreen(Screen):
         surface.fill(BACKGROUND)
         running = self.timer.state is TimerState.RUNNING
         heading = "solve" if self.whole else f"{self.phases[-1]} drill"
-        theme.text(surface, f"{heading}   {'  '.join(self.labels)}",
-                   (MARGIN, 28), 20, TEXT_DIM)
+        if not self.in_one_go:
+            heading += "   " + "  ".join(self.labels)
+        theme.text(surface, heading, (MARGIN, 28), 20, TEXT_DIM)
         self._draw_session_line(surface)
 
         if not running:
@@ -965,7 +999,8 @@ class SolveScreen(Screen):
             colour = TEXT
             reading = theme.format_time(self.timer.elapsed(self.app.now))
             done = len(self.timer.splits())
-            label = f"next press closes {self.labels[done]}"
+            label = ("press when your cube is solved" if self.in_one_go
+                     else f"next press closes {self.labels[done]}")
         else:
             colour, reading = TEXT_DIM, "0.00"
             label = ("i to inspect, or hold space to arm" if self.inspection
@@ -998,7 +1033,8 @@ class SolveScreen(Screen):
         elif self.stage == "result":
             hint = "space next scramble   2 penalty   d discard as DNF   esc end session"
         elif self.timer.state is TimerState.RUNNING:
-            hint = "space closes each phase   d fumbled   esc end session"
+            hint = ("space stops   d fumbled   esc end session" if self.in_one_go
+                    else "space closes each phase   d fumbled   esc end session")
         elif self.inspection:
             hint = "i inspect   hold space to start   d fumbled   esc end session"
         else:

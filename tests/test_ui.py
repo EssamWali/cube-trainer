@@ -15,7 +15,8 @@ from cubetrainer.store.stats import case_report
 from cubetrainer.trainer.scramble import scramble_for
 from cubetrainer.trainer.timer import TimerState
 from cubetrainer.ui import render
-from cubetrainer.ui.app import (SOLVE_PHASES, App, DrillScreen, HomeScreen,
+from cubetrainer.ui.app import (SOLVE_PHASES, WHOLE_SOLVE, App, DrillScreen,
+                               HomeScreen,
                                algorithm_for,
                                PickerScreen, SolveScreen, SolveSetupScreen,
                                StatsScreen, solve_split_labels)
@@ -748,6 +749,88 @@ def test_a_run_with_no_boundary_cannot_start(app):
     assert key_down(setup, app, pygame.K_RETURN) is None
     key_down(setup, app, pygame.K_SPACE)  # tick whatever the cursor is on
     assert isinstance(key_down(setup, app, pygame.K_RETURN), SolveScreen)
+
+
+def test_a_run_starts_out_timing_the_whole_solve_in_one_go(app):
+    """What most people want most of the time is a timer: pick the cube up, put
+    it down, read the number. Splitting a solve four ways is the thing you opt
+    into, not the thing you have to opt out of."""
+    setup = SolveSetupScreen(app)
+    assert setup.ticked == WHOLE_SOLVE
+    assert setup.in_one_go
+    assert "one go" in setup.summary
+
+    solve = key_down(setup, app, pygame.K_RETURN)
+    assert isinstance(solve, SolveScreen)
+    assert solve.in_one_go
+    assert solve.whole, "a solve in one go is still a whole solve"
+
+
+def test_one_press_stops_a_solve_timed_in_one_go(app):
+    solve = SolveScreen(app, WHOLE_SOLVE)
+    do_a_solve(solve, app, presses=(18.0,))
+    assert solve.timer.is_finished
+    assert solve.stage == "result", "a whole solve ends on a solved cube"
+    recorded, = app.store.solves()
+    assert recorded["duration_ms"] == pytest.approx(17300, abs=2)
+
+
+def test_a_solve_timed_in_one_go_records_no_splits(app):
+    """One split covering the whole solve is the solve's own time written down a
+    second time, and it would put a phase in the phase means whose mean is just
+    the solve mean."""
+    solve = SolveScreen(app, WHOLE_SOLVE)
+    do_a_solve(solve, app, presses=(18.0,))
+    assert app.store.splits() == []
+    assert len(app.store.solves(whole_only=True)) == 1, "it is still a solve"
+
+
+def test_timing_in_one_go_and_splitting_share_the_solve_average(app):
+    """Both are whole solves, however many times you pressed on the way, so they
+    belong in the same average -- unlike a run that stops at the cross."""
+    quick = SolveScreen(app, WHOLE_SOLVE)
+    do_a_solve(quick, app, presses=(18.0,))
+    key_down(quick, app, pygame.K_ESCAPE)
+
+    split = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(split, app, start=30.0, presses=(32.0, 40.0, 44.0, 48.0))
+    key_down(split, app, pygame.K_ESCAPE)
+
+    assert len(app.store.solves(whole_only=True)) == 2
+    assert len(app.store.splits()) == 4, "only the split run has splits"
+
+
+def test_n_takes_the_boundaries_off_the_way_and_a_puts_them_back(app):
+    setup = SolveSetupScreen(app, phases=SOLVE_PHASES)
+    assert not setup.in_one_go
+    key_down(setup, app, pygame.K_n)
+    assert setup.ticked == WHOLE_SOLVE
+    key_down(setup, app, pygame.K_a)
+    assert setup.ticked == SOLVE_PHASES
+    assert not setup.in_one_go
+
+
+def test_a_run_that_stops_early_is_never_one_go(app):
+    """Timing only the cross is one press too, and it is not a whole solve, so
+    it keeps its split: that split is the only place the cross time is filed."""
+    setup = SolveSetupScreen(app, phases=("Cross",))
+    assert not setup.in_one_go
+    solve = SolveScreen(app, ("Cross",))
+    assert not solve.in_one_go
+    do_a_solve(solve, app, presses=(3.0,))
+    assert [split["phase"] for split in app.store.splits()] == ["Cross"]
+
+
+def test_every_stage_of_a_solve_in_one_go_draws(app):
+    surface = pygame.Surface((1180, 780))
+    setup = SolveSetupScreen(app)
+    setup.draw(surface)
+    solve = SolveScreen(app, WHOLE_SOLVE)
+    solve.draw(surface)
+    do_a_solve(solve, app, presses=())
+    solve.draw(surface)
+    key_down(solve, app, pygame.K_SPACE, now=18.0)
+    solve.draw(surface)
 
 
 def test_the_boundaries_are_ticked_and_untickable(app):

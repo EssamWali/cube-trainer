@@ -68,22 +68,27 @@ a +2 the same way.
 **Time a solve** — a scramble, WCA inspection, and a timer that stops where you
 tell it to.
 
-Tick the boundaries you want to press at before you start. All four is a solve
-reported four ways. Cross alone is a cross drill: the same screen and the same
-timer, stopping at the first press. A phase you leave unticked is still being
-solved, so it is folded into the next split and named there — tick Cross and
-PLL and your second press closes `F2L+OLL+PLL`, because that is what it covers.
+It starts out as a plain timer: pick the cube up, put it down, read the number.
+Press `enter` and go.
+
+If you want your splits, tick the boundaries you want to press at first. All
+four is a solve reported four ways. Cross alone is a cross drill: the same
+screen and the same timer, stopping at the first press. A phase you leave
+unticked is still being solved, so it is folded into the next split and named
+there — tick Cross and PLL and your second press closes `F2L+OLL+PLL`, because
+that is what it covers.
 
 | key | |
 | --- | --- |
 | arrows | move between phases |
 | `space` | tick the phase under the cursor |
-| `a` | tick all four |
+| `a` | tick every phase |
+| `n` | none on the way: back to one press at the end |
 | `i` | inspection on or off, then `i` again to start inspecting |
 | `enter` | start |
 
 Then `i` to start your inspection, hold `space` to arm, and press it at each
-boundary. Inspection runs by the WCA thresholds: over 15 seconds is a +2, over
+boundary — or once, at the end, if you left it as a plain timer. Inspection runs by the WCA thresholds: over 15 seconds is a +2, over
 17 is a DNF. `2` and `d` amend the attempt you just made.
 
 A run that stops before the cube is solved leaves you holding a part-solved
