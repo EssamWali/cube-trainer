@@ -436,6 +436,45 @@ def is_cross_solved(cube):
     return all(_piece_is_home(cube, ("D", face)) for face in "FRBL")
 
 
+#: Every sticker on a piece of the upper layer. Constant, because which pieces
+#: are up there is a fact about the cube and not about any state of it.
+UPPER_LAYER_STICKERS = frozenset(
+    index for index in range(54) if _cubie_of(index)[1] == 2)
+
+
+def pair_stickers(cube, slot):
+    """Every sticker on the two pieces `slot`'s pair is made of, wherever they
+    are.
+
+    Which stickers those are moves with the case, so it is asked of the state
+    rather than looked up: a corner in the upper face and the same corner
+    stuck in its slot are the same piece and not the same three stickers.
+    """
+    face_of = cube.orientation()
+    wanted = (frozenset(("D",) + tuple(slot)), frozenset(slot))
+    found = set()
+    for indices in _STICKERS_ON.values():
+        if frozenset(face_of[cube.facelets[i]] for i in indices) in wanted:
+            found.update(indices)
+    return frozenset(found)
+
+
+def slot_in_progress(cube):
+    """The one slot an F2L case is about, or None when the state is not one.
+
+    Asked of the state rather than passed in, so that a screen handed a cube
+    does not have to know which phase it came from. A last-layer case has every
+    slot finished and answers None; a cube with two slots open is not a case at
+    all and answers None as well.
+    """
+    if not is_cross_solved(cube):
+        return None
+    open_slots = [slot for slot in F2L_SLOTS if not is_slot_finished(cube, slot)]
+    if len(open_slots) != 1:
+        return None
+    return open_slots[0] if is_f2l_state(cube, open_slots[0]) else None
+
+
 def is_f2l_state(cube, slot):
     """Whether the cube is one pair from finished, and that pair is `slot`'s.
 

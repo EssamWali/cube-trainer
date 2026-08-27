@@ -40,6 +40,22 @@ def _position(index):
 
 
 POSITIONS = tuple(_position(i) for i in range(54))
+
+
+def sticker_corners(index):
+    """The four corners of a sticker, going round its edge.
+
+    The engine only ever needs a sticker's centre. A picture of the cube needs
+    its outline, and the outline follows from the same frame the centre does --
+    half a cell along each of the face's two directions -- rather than from a
+    second description of where the faces are.
+    """
+    _, rowdir, coldir = _FRAME[FACE_ORDER[index // 9]]
+    centre = POSITIONS[index]
+    return tuple(
+        tuple(centre[a] + rowdir[a] * down + coldir[a] * across for a in range(3))
+        for down, across in ((-1, -1), (-1, 1), (1, 1), (1, -1))
+    )
 _INDEX_AT = {p: i for i, p in enumerate(POSITIONS)}
 assert len(_INDEX_AT) == 54, "facelet positions are not distinct"
 

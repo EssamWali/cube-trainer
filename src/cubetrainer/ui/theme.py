@@ -45,6 +45,11 @@ ARROW_CASING = (250, 250, 248)
 #: How far the casing stands out past the ink, as a share of a sticker's width.
 CASING_WIDTH = 0.02
 
+# A sticker the case is not about. An F2L case says nothing about the last
+# layer -- it can be anything up there, and usually is -- so those stickers are
+# drawn but set aside, and the eye goes to the pair.
+ASIDE = (88, 94, 106)
+
 # An orientation diagram asks one question of every sticker -- is it facing up
 # -- so it is drawn in the two colours that question has answers. The upper
 # face keeps its own colour; everything else goes grey, because which colour it

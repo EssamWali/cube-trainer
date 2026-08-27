@@ -7,22 +7,37 @@ disagree: there is only one source for both.
 The layout is the one every last-layer diagram uses: the upper face seen from
 above, ringed by the side stickers of the pieces in it.
 
-How it is coloured follows from what the state is. A last layer already
-oriented is a permutation case, so it is drawn in true colours with arrows
-showing where each piece has to go once the upper face is adjusted. A last
-layer not yet oriented is an orientation case, so it is drawn in two tones --
-facing up, or not -- and no arrows, because an arrow says where a piece has to
-travel and an orientation case is not about where anything travels. Both
-readings come from the same state, which is why the picture and the scramble
-cannot disagree.
+How it is drawn follows from what the state is, which is also what decides
+which of three pictures it gets.
+
+A cube with a slot still open is an F2L case, and it is drawn as a cube seen
+from a corner -- the upper, front and right faces at once -- because half of the
+case is in the slot, underneath the layer the other pictures draw. The last
+layer is greyed: it can be anything up there, and usually is, so drawing it in
+colour would invite reading something that is not the question.
+
+Otherwise the first two layers are done and the case is a last-layer one, seen
+from directly above. A last layer already oriented is a permutation case, so it
+is drawn in true colours with arrows showing where each piece has to go once the
+upper face is adjusted. One not yet oriented is an orientation case, so it is
+drawn in two tones -- facing up, or not -- and no arrows, because an arrow says
+where a piece has to travel and an orientation case is not about where anything
+travels.
+
+Every one of those readings comes from the same state, which is why the picture
+and the scramble cannot disagree, and why a screen is never asked which picture
+it wants.
 """
 
 import math
 
 import pygame
 
-from ..cases.pattern import CENTRE_U, is_last_layer_oriented, u_layer_cycles
-from .theme import (ACCENT, ARROW, ARROW_CASING, CASING_WIDTH, DIAGRAM,
+from ..cube.geometry import FACE_ORDER, sticker_corners
+from ..cases.pattern import (CENTRE_U, UPPER_LAYER_STICKERS,
+                             is_last_layer_oriented, pair_stickers,
+                             slot_in_progress, u_layer_cycles)
+from .theme import (ACCENT, ARROW, ARROW_CASING, ASIDE, CASING_WIDTH, DIAGRAM,
                     FACE_COLOURS, GRID_LINE, HIDDEN, ORIENTED, READY, TEXT,
                     TEXT_DIM, TILE, TILE_FOCUS, UNORIENTED, font)
 
@@ -67,6 +82,65 @@ def face_grid(rect):
             for row in range(3) for column in range(3)]
 
 
+#: The faces a cube shows when you look at it from over its front-right corner.
+#: Its whole upper face is in view, which is what makes this enough: a piece of
+#: the pair is named by the sticker it shows on top -- the corner carries the
+#: cross colour and the slot's two, so whichever is up says how it is twisted.
+SEEN_FROM_THE_CORNER = ("U", "F", "R")
+
+#: How far a step along each axis moves across and down the picture. A cube
+#: drawn this way is three rhombuses; these are their edges.
+_ACROSS = math.cos(math.radians(30))
+_DOWN = 0.5
+
+
+def _flatten(point):
+    """Where a point of the cube lands on the screen, before scaling."""
+    x, y, z = point
+    return ((x - z) * _ACROSS, (x + z) * _DOWN - y)
+
+
+#: How thick the line between two stickers is drawn. It straddles the edge it
+#: is drawn on, so the cube is fitted to a rectangle this much smaller than the
+#: one it was given -- otherwise it spills over its neighbour in the picker.
+OUTLINE = 2
+
+
+def _corner_view(rect):
+    """Every visible sticker as a screen-space outline, fitted to `rect`."""
+    faces = [FACE_ORDER.index(face) * 9 + cell
+             for face in SEEN_FROM_THE_CORNER for cell in range(9)]
+    shapes = [(index, [_flatten(p) for p in sticker_corners(index)])
+              for index in faces]
+    xs = [x for _, quad in shapes for x, _ in quad]
+    ys = [y for _, quad in shapes for _, y in quad]
+    fitted = rect.inflate(-OUTLINE * 2, -OUTLINE * 2)
+    scale = min(fitted.width / (max(xs) - min(xs)),
+                fitted.height / (max(ys) - min(ys)))
+    left = fitted.centerx - (max(xs) + min(xs)) / 2 * scale
+    top = fitted.centery - (max(ys) + min(ys)) / 2 * scale
+    return [(index, [(left + x * scale, top + y * scale) for x, y in quad])
+            for index, quad in shapes]
+
+
+def _draw_f2l_case(surface, cube, rect, slot, hidden=False):
+    """One pair and the slot it belongs in, on a cube seen from a corner."""
+    pair = pair_stickers(cube, slot)
+
+    def sticker(index):
+        if hidden:
+            return HIDDEN
+        if index in pair:
+            return FACE_COLOURS[cube.facelets[index]]
+        if index in UPPER_LAYER_STICKERS:
+            return ASIDE
+        return FACE_COLOURS[cube.facelets[index]]
+
+    for index, quad in _corner_view(rect):
+        pygame.draw.polygon(surface, sticker(index), quad)
+        pygame.draw.polygon(surface, GRID_LINE, quad, OUTLINE)
+
+
 def draw_case(surface, cube, rect, arrows=True, hidden=False):
     """Draw the last layer of `cube` inside `rect`.
 
@@ -77,6 +151,11 @@ def draw_case(surface, cube, rect, arrows=True, hidden=False):
     `arrows` asks for permutation arrows where they mean something; an
     orientation case never gets them.
     """
+    slot = slot_in_progress(cube)
+    if slot is not None:
+        _draw_f2l_case(surface, cube, rect, slot, hidden=hidden)
+        return
+
     two_tone = not is_last_layer_oriented(cube)
 
     def sticker(index):
@@ -136,6 +215,8 @@ def arrow_paths(cube, rect):
     inner, cell, _ = _frame(rect)
     if not is_last_layer_oriented(cube):
         return []  # an orientation case is not about where anything travels
+    if slot_in_progress(cube) is not None:
+        return []  # an F2L case is about where two pieces are, not where they go
     try:
         corners, edges = u_layer_cycles(cube)
     except ValueError:

@@ -10,11 +10,11 @@ import math
 import pygame
 import pytest
 
-from cubetrainer.cases import oll, pll
+from cubetrainer.cases import f2l, oll, pll
 from cubetrainer.cube import Cube
 from cubetrainer.ui import render, theme
-from cubetrainer.ui.theme import (ARROW, ARROW_CASING, DIAGRAM, FACE_COLOURS,
-                                  HIDDEN, ORIENTED, UNORIENTED)
+from cubetrainer.ui.theme import (ARROW, ARROW_CASING, ASIDE, DIAGRAM,
+                                  FACE_COLOURS, HIDDEN, ORIENTED, UNORIENTED)
 
 RECT = pygame.Rect(0, 0, 240, 240)
 TWO_TONES = {ORIENTED, UNORIENTED}
@@ -343,3 +343,104 @@ def test_every_case_draws_as_a_thumbnail_at_every_angle():
             rect = pygame.Rect((index % 8) * 140, (index // 8) * 140, 132, 132)
             render.draw_thumbnail(surface, state.apply(auf) if auf else state,
                                   rect, case.id)
+
+
+# --- an F2L case is a different picture, chosen from the state --------------
+
+def _f2l(case_id="F2L 3", auf=""):
+    state = Cube.solved().apply(f2l.get(case_id).setup)
+    return state.apply(auf) if auf else state
+
+
+def test_an_f2l_case_is_drawn_as_a_cube_seen_from_a_corner():
+    """Half of an F2L case is in the slot, underneath the layer the last-layer
+    diagram draws, so it gets the picture that can show a slot: the upper, front
+    and right faces at once.
+
+    Told apart from the other picture by the card: the view from above sits on
+    one, and a cube seen from a corner is a cube rather than a diagram."""
+    drawn = _drawn(_f2l())
+    assert DIAGRAM not in drawn, "an F2L case was drawn as a flat diagram"
+    assert ASIDE in drawn, "nothing was set aside, so the last layer is in colour"
+    assert len(drawn & set(FACE_COLOURS.values())) >= 3
+
+
+def test_the_last_layer_phases_are_still_drawn_from_above():
+    """Adding a third picture must not have moved the other two."""
+    for state in (_state(pll.get("T")), _state(oll.get("OLL 27"))):
+        assert DIAGRAM in _drawn(state)
+        assert ASIDE not in _drawn(state)
+
+
+def test_a_screen_never_says_which_picture_it_wants():
+    """Three phases, one call. Adding a phase stays data rather than a change to
+    every screen, which is only true while the state decides."""
+    surface = pygame.Surface((260, 260))
+    pictures = set()
+    for state in (_f2l(), _state(oll.get("OLL 27")), _state(pll.get("T"))):
+        surface.fill((1, 2, 3))
+        render.draw_case(surface, state, RECT)
+        pictures.add(pygame.image.tostring(surface, "RGB"))
+    assert len(pictures) == 3
+
+
+def test_the_last_layer_is_set_aside_but_the_pair_is_not():
+    """An F2L case says nothing about the last layer -- it can be anything up
+    there, and usually is -- so drawing it in colour would invite reading
+    something that is not the question. The pair keeps its colours wherever it
+    is, which is the only thing up there worth looking at."""
+    up = _drawn(_f2l("F2L 3"))       # pair in the upper face
+    assert ASIDE in up
+    assert len(up & set(FACE_COLOURS.values())) >= 3, "the pair lost its colours"
+
+    down = _drawn(_f2l("F2L 41"))    # pair already in the slot
+    assert ASIDE in down
+    assert FACE_COLOURS["F"] in down and FACE_COLOURS["R"] in down
+
+
+def test_no_two_f2l_cases_are_drawn_alike_from_any_angle():
+    """A drill hands the case out at one of its four angles, so two cases that
+    share a picture at any of them is a case a cuber cannot be asked to
+    recognise."""
+    seen = {}
+    for case in f2l.F2L_CASES:
+        for auf in ("", "U", "U2", "U'"):
+            surface = pygame.Surface((160, 160))
+            surface.fill((1, 2, 3))
+            render.draw_case(surface, _f2l(case.id, auf), pygame.Rect(0, 0, 160, 160))
+            seen.setdefault(pygame.image.tostring(surface, "RGB"), set()).add(case.id)
+    shared = [sorted(ids) for ids in seen.values() if len(ids) > 1]
+    assert shared == [], f"drawn identically: {shared[:3]}"
+
+
+def test_no_arrows_are_drawn_for_an_f2l_case():
+    """An arrow says where a piece travels. An F2L case is about where two
+    pieces are, and the answer to that is the picture."""
+    for case in f2l.F2L_CASES:
+        assert render.arrow_paths(_f2l(case.id), RECT) == [], case.id
+
+
+def test_hidden_blanks_an_f2l_case():
+    """The drill covers the case until the cuber asks for it, whichever picture
+    it would have got."""
+    assert _drawn(_f2l(), hidden=True) <= {HIDDEN, render.GRID_LINE, (1, 2, 3)}
+
+
+def test_every_f2l_case_draws_as_a_thumbnail():
+    surface = pygame.Surface((1180, 780))
+    for index, case in enumerate(f2l.F2L_CASES):
+        rect = pygame.Rect((index % 8) * 140, (index // 8) * 140, 132, 132)
+        render.draw_thumbnail(surface, _f2l(case.id), rect, case.id)
+
+
+def test_an_f2l_case_fits_the_rectangle_it_is_given():
+    """The picker gives every phase the same tile, so a cube drawn from a corner
+    has to sit inside one rather than spill over its neighbours."""
+    rect = pygame.Rect(40, 40, 120, 120)
+    surface = pygame.Surface((200, 200))
+    surface.fill((1, 2, 3))
+    render.draw_case(surface, _f2l(), rect)
+    for x in range(200):
+        for y in range(200):
+            if not rect.collidepoint(x, y):
+                assert surface.get_at((x, y))[:3] == (1, 2, 3), f"spilled at {x},{y}"

@@ -136,11 +136,15 @@ facelet indices, so face turns, slices, wide moves and rotations all come from
 one definition. It is cross-checked against `kociemba`, an unrelated solver.
 
 The picture follows from the state rather than from a stored image, which is
-also what decides how it is drawn. A last layer already oriented is a
-permutation case, so it is drawn in true colours with arrows saying where each
-piece has to go. A last layer not yet oriented is an orientation case, so it is
-drawn in the two tones that question has answers, and no arrows — an arrow says
-where a piece travels, which is a wrong answer about an OLL case.
+also what decides which of three pictures it gets, so no screen is ever asked
+which one it wants. A cube with a slot still open is an F2L case, drawn as a
+cube seen from a corner — half of the case is in the slot, underneath the layer
+the other pictures draw — with the last layer greyed, because an F2L case says
+nothing about it. A last layer already oriented is a permutation case, so it is
+drawn in true colours with arrows saying where each piece has to go. One not yet
+oriented is an orientation case, so it is drawn in the two tones that question
+has answers, and no arrows — an arrow says where a piece travels, which is a
+wrong answer about an OLL case.
 
 The arrows are read with the AUF divided out, because a drill hands you the case
 at a random one of its four angles. Read as "where does each piece belong", a T
