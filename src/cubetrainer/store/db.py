@@ -101,28 +101,42 @@ class Store:
         self.connection.commit()
         return solve_id
 
+    def _penalise(self, table, row_id, penalty):
+        """The penalty itself, which is the same sentence about a rep and a
+        solve. Only ever called with a table named here."""
+        if penalty == "plus_two":
+            self.connection.execute(
+                f"UPDATE {table} SET penalty = 'plus_two',"
+                " duration_ms = duration_ms + 2000"
+                " WHERE id = ? AND duration_ms IS NOT NULL", (row_id,))
+        elif penalty == "dnf":
+            self.connection.execute(
+                f"UPDATE {table} SET penalty = 'dnf', duration_ms = NULL"
+                " WHERE id = ?", (row_id,))
+        else:
+            raise ValueError(f"unknown penalty {penalty!r}")
+
+    def penalise_rep(self, rep_id, penalty):
+        """Apply a penalty to a rep already recorded.
+
+        A cuber decides a rep was a +2, or was not an attempt at all, after
+        they have stopped the timer. That amends the attempt they just made
+        rather than adding a second one, which is the difference between
+        discarding an attempt and having made two.
+        """
+        self._penalise("rep", rep_id, penalty)
+        self.connection.commit()
+
     def penalise_solve(self, solve_id, penalty):
         """Apply a penalty to a solve already recorded.
 
-        A cuber decides a solve was a +2, or was not a solve at all, after they
-        have stopped the timer. That amends the attempt they just made rather
-        than adding a second one, which is the difference between a penalty and
-        a new record. A DNF takes its splits with it: they are times from an
-        attempt that did not happen.
+        As `penalise_rep`, except that a DNF takes its splits with it: they are
+        times from an attempt that did not happen.
         """
-        if penalty == "plus_two":
-            self.connection.execute(
-                "UPDATE solve SET penalty = 'plus_two',"
-                " duration_ms = duration_ms + 2000"
-                " WHERE id = ? AND duration_ms IS NOT NULL", (solve_id,))
-        elif penalty == "dnf":
-            self.connection.execute(
-                "UPDATE solve SET penalty = 'dnf', duration_ms = NULL"
-                " WHERE id = ?", (solve_id,))
+        self._penalise("solve", solve_id, penalty)
+        if penalty == "dnf":
             self.connection.execute(
                 "DELETE FROM phase_split WHERE solve_id = ?", (solve_id,))
-        else:
-            raise ValueError(f"unknown penalty {penalty!r}")
         self.connection.commit()
 
     # -- reading ----------------------------------------------------------

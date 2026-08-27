@@ -317,3 +317,37 @@ def test_whole_solves_are_the_ones_whose_session_names_no_phase(store):
     assert len(store.solves()) == 2
     assert [s["session_id"] for s in store.solves(whole_only=True)] == [whole]
     assert len(store.splits()) == 3, "every attempt keeps its splits"
+
+
+def test_penalising_a_rep_amends_the_attempt_it_names(store):
+    session = store.start_session("drill", "PLL")
+    first = store.record_rep(session, "T", "R U", 2.0)
+    second = store.record_rep(session, "T", "L D", 3.0)
+
+    store.penalise_rep(first, "plus_two")
+    by_id = {row["id"]: row for row in store.reps()}
+    assert by_id[first]["duration_ms"] == 4000
+    assert by_id[first]["penalty"] == "plus_two"
+    assert by_id[second]["duration_ms"] == 3000, "the other rep was touched"
+
+    store.penalise_rep(second, "dnf")
+    by_id = {row["id"]: row for row in store.reps()}
+    assert by_id[second]["duration_ms"] is None
+    assert by_id[second]["penalty"] == "dnf"
+    assert len(store.reps()) == 2, "a penalty added an attempt"
+
+
+def test_a_rep_penalty_nobody_recognises_is_refused(store):
+    session = store.start_session("drill", "PLL")
+    rep = store.record_rep(session, "T", "R U", 2.0)
+    with pytest.raises(ValueError):
+        store.penalise_rep(rep, "minus_two")
+
+
+def test_a_plus_two_on_a_rep_with_no_time_does_nothing(store):
+    """There is nothing to add two seconds to, and NULL plus two is NULL."""
+    session = store.start_session("drill", "PLL")
+    rep = store.record_rep(session, "T", "R U", 2.0, penalty="dnf")
+    store.penalise_rep(rep, "plus_two")
+    recorded, = store.reps()
+    assert recorded["duration_ms"] is None

@@ -8,6 +8,9 @@ and times you WCA-style while you recognise and solve it. It records every rep,
 so it can tell you which cases you are actually slow at rather than which
 algorithms happen to be long.
 
+It times whole solves too, split at whichever phase boundaries you want to press
+at — including just the one, which is how you drill your cross.
+
 The cube stays in your hands. The application never sees it.
 
 ## Running it
@@ -58,6 +61,34 @@ still recorded, but marked as peeked and left out of your averages.
 Press `d` if you fumble. Every scramble assumes you are starting from a solved
 cube, and a misexecuted algorithm leaves the cube somewhere the trainer cannot
 follow, so the rep is logged as a DNF and you solve your cube before continuing.
+Pressing `d` on a rep you have already stopped discards that rep instead: it
+becomes the DNF, rather than gaining a second attempt beside it. `2` gives it
+a +2 the same way.
+
+**Time a solve** — a scramble, WCA inspection, and a timer that stops where you
+tell it to.
+
+Tick the boundaries you want to press at before you start. All four is a solve
+reported four ways. Cross alone is a cross drill: the same screen and the same
+timer, stopping at the first press. A phase you leave unticked is still being
+solved, so it is folded into the next split and named there — tick Cross and
+PLL and your second press closes `F2L+OLL+PLL`, because that is what it covers.
+
+| key | |
+| --- | --- |
+| arrows | move between phases |
+| `space` | tick the phase under the cursor |
+| `a` | tick all four |
+| `i` | inspection on or off, then `i` again to start inspecting |
+| `enter` | start |
+
+Then `i` to start your inspection, hold `space` to arm, and press it at each
+boundary. Inspection runs by the WCA thresholds: over 15 seconds is a +2, over
+17 is a DNF. `2` and `d` amend the attempt you just made.
+
+A run that stops before the cube is solved leaves you holding a part-solved
+cube, so it asks you to finish it before the next scramble — every scramble
+here assumes a solved one too.
 
 **Algorithm library** — the same grid, browsable, with each case's algorithm,
 one entry per phase.
@@ -70,6 +101,11 @@ time mostly tells you which algorithms are long, which you already knew.
 
 One phase at a time, with the arrow keys to switch. An OLL case and a PLL case
 in the same ranking would be two incomparable things in one list.
+
+Above the ranking: your solve count with its mean, ao5 and ao12, and the mean of
+every phase split you have recorded. Only whole solves reach the averages. A
+cross time is a time, but averaged in with solve times it makes a number about
+nothing, so a run that stopped early keeps its splits and stays out of the mean.
 
 ## How it works
 
@@ -88,6 +124,14 @@ piece has to go. A last layer not yet oriented is an orientation case, so it is
 drawn in the two tones that question has answers, and no arrows — an arrow says
 where a piece travels, which is a wrong answer about an OLL case.
 
+The arrows are read with the AUF divided out, because a drill hands you the case
+at a random one of its four angles. Read as "where does each piece belong", a T
+perm met a quarter turn round has no piece at home and needs seven arrows; what
+you would be shown then is the case plus an adjustment you have not made yet,
+which is not a T perm and not worth practising against. So the arrows say where
+each piece goes once you have adjusted the upper face, and two pieces that trade
+places share one arrow with a head at each end.
+
 The case data is not checked against its own algorithms, which would be
 circular. It is checked against the cube group: the tests enumerate all 21
 last-layer permutation classes, and all 57 orientation classes, and require the
@@ -103,6 +147,10 @@ pytest
 
 ## Not built yet
 
-Full-solve timing with phase splits, and cross drills. The domain layer
-already carries them — the timer takes any number of phases, the store records
-splits as their own rows — but the screens drill cases and nothing else for now.
+F2L. It is a phase everywhere in the vocabulary and in the phase splits, but
+there are no F2L cases to drill, only a boundary to press at.
+
+Choosing your own algorithm for a case. The store keeps overrides in their own
+table so that updating the application never overwrites what you have learned,
+and the drill and the library both show yours if one is set — but nothing on
+screen can set one yet.

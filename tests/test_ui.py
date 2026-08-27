@@ -11,6 +11,7 @@ import pytest
 from cubetrainer.cases import CATALOGUES, pll
 from cubetrainer.cube import Cube
 from cubetrainer.store import Store
+from cubetrainer.store.stats import case_report
 from cubetrainer.trainer.timer import TimerState
 from cubetrainer.ui import render
 from cubetrainer.ui.app import (SOLVE_PHASES, App, DrillScreen, HomeScreen,
@@ -234,6 +235,62 @@ def test_a_plus_two_penalty_updates_the_recorded_time(app):
     rep, = app.store.reps()
     assert rep["penalty"] == "plus_two"
     assert rep["duration_ms"] == pytest.approx(3800, abs=1)
+
+
+def test_discarding_a_finished_rep_amends_it_rather_than_recording_another(app):
+    """The help line says "discard as DNF". Recording a second rep alongside the
+    one being discarded is the opposite of that: it keeps the time and adds a
+    DNF to the case's record."""
+    drill = DrillScreen(app, ["T"])
+    do_a_rep(drill, app, start=0.0, finish=2.5)
+    assert len(app.store.reps()) == 1
+
+    key_down(drill, app, pygame.K_d)
+    rep, = app.store.reps()
+    assert rep["penalty"] == "dnf"
+    assert rep["duration_ms"] is None
+    assert drill.stage == "reset"
+    assert drill.times == [] and drill.dnfs == 1
+
+    key_down(drill, app, pygame.K_d)
+    assert len(app.store.reps()) == 1, "discarding twice discarded twice"
+    assert drill.dnfs == 1
+
+
+def test_a_discarded_rep_counts_as_one_attempt_in_the_statistics(app):
+    """`attempts` and `dnf_rate` are counted over reps, and `dnf_rate` is one of
+    the signals the ranking uses -- so a rep recorded twice tells a cuber they
+    are unreliable at the very cases they discarded on."""
+    drill = DrillScreen(app, ["T"])
+    do_a_rep(drill, app, start=0.0, finish=2.5)
+    key_down(drill, app, pygame.K_d)
+    report = case_report("T", app.store.reps(case_id="T"))
+    assert report.attempts == 1
+    assert report.dnf_rate == 1.0
+    assert report.counted == 0
+
+
+def test_a_penalty_on_a_peeked_rep_leaves_the_running_mean_alone(app):
+    """A peeked rep never entered `times`, because a time achieved while reading
+    the answer is not a time. So neither penalty may reach in there for one:
+    the entry it would correct belongs to some earlier rep."""
+    drill = DrillScreen(app, ["T", "Ja"])
+    do_a_rep(drill, app, start=0.0, finish=2.5)
+    key_down(drill, app, pygame.K_SPACE)
+    key_down(drill, app, pygame.K_p)
+    assert drill.peeked
+    do_a_rep(drill, app, start=10.0, finish=14.0)
+    counted = list(drill.times)
+    assert counted == [pytest.approx(1.8, abs=0.01)]
+
+    key_down(drill, app, pygame.K_2)
+    assert drill.times == counted, "the peeked rep's +2 reached a counted one"
+    peeked_rep = app.store.reps()[-1]
+    assert peeked_rep["penalty"] == "plus_two"
+    assert peeked_rep["duration_ms"] == pytest.approx(5300, abs=1)
+
+    key_down(drill, app, pygame.K_d)
+    assert drill.times == counted, "the peeked rep's discard reached a counted one"
 
 
 def test_the_drill_deals_every_selected_case_before_repeating(app):

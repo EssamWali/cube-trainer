@@ -479,14 +479,20 @@ class DrillScreen(Screen):
         if key == pygame.K_d:
             # A fumbled algorithm leaves the cube somewhere the trainer cannot
             # follow, so the only honest recovery is to solve it and start over.
-            if self.stage in ("scramble", "result"):
-                if self.stage == "scramble" and self.timer.state is TimerState.RUNNING:
+            if self.stage == "scramble":
+                if self.timer.state is TimerState.RUNNING:
                     self.timer.press(self.app.now)
                 self._record(penalty="dnf")
                 self.stage = "reset"
+            elif self.stage == "result":
+                # The rep is already in the store. Discarding it means that
+                # attempt was not one, not that there was a second attempt that
+                # was not one.
+                self._penalise("dnf")
+                self.stage = "reset"
             return None
         if key == pygame.K_2 and self.stage == "result" and self.last_time is not None:
-            self._apply_plus_two()
+            self._penalise("plus_two")
             return None
         if key == pygame.K_SPACE:
             if self.stage == "result":
@@ -501,19 +507,28 @@ class DrillScreen(Screen):
             return None
         return None
 
-    def _apply_plus_two(self):
+    def _penalise(self, penalty):
+        """Amend the rep just recorded, rather than adding another one.
+
+        A peeked rep is never in `times` -- a time achieved while reading the
+        answer is not a time -- so neither penalty may reach in there for one,
+        or it corrects a figure belonging to some earlier rep.
+        """
         rows = self.app.store.reps(session_id=self.session)
-        if not rows:
+        if not rows or rows[-1]["penalty"] == "dnf":
             return
         last = rows[-1]
-        self.app.store.connection.execute(
-            "UPDATE rep SET penalty = 'plus_two', duration_ms = duration_ms + 2000"
-            " WHERE id = ?", (last["id"],)
-        )
-        self.app.store.connection.commit()
-        self.last_time = (last["duration_ms"] + 2000) / 1000.0
-        if self.times:
-            self.times[-1] = self.last_time
+        counted = self.last_time is not None and not self.peeked
+        self.app.store.penalise_rep(last["id"], penalty)
+        if penalty == "dnf":
+            if counted and self.times:
+                self.times.pop()
+            self.last_time = None
+            self.dnfs += 1
+        elif last["duration_ms"] is not None:
+            self.last_time = (last["duration_ms"] + 2000) / 1000.0
+            if counted and self.times:
+                self.times[-1] = self.last_time
 
     def update(self, now):
         if self.stage == "scramble":
