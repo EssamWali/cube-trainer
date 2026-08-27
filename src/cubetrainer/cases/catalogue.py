@@ -32,7 +32,11 @@ class Case:
     algorithm: str
     description: str
     #: id of the case that undoes this one; equal to `id` when self-inverse.
-    inverse: str
+    #: A last-layer idea: the inverse of a last-layer case is another one, so
+    #: the declaration is checkable against the cube and catches a mistranscribed
+    #: algorithm. Undoing an F2L insert takes the pair back out, which is a case
+    #: but not a fact a cuber says about F2L, so a phase may leave it unsaid.
+    inverse: str = None
 
     @property
     def setup(self):
@@ -64,7 +68,12 @@ class Case:
 
     @property
     def is_self_inverse(self):
-        return self.inverse == self.id
+        """Whether undoing this case gives the same case back.
+
+        False when the phase does not say, which is not the same as saying no:
+        a case with no declaration is one nobody asked the question of.
+        """
+        return self.inverse is not None and self.inverse == self.id
 
 
 class Catalogue:
