@@ -24,6 +24,16 @@ _Avoid_: Algorithm, which is reserved for a sequence that solves a case.
 A move that turns the whole cube rather than a layer, changing how it is held
 without changing what is solved.
 
+**Slot**:
+One of the four places in the first two layers where a corner and an edge sit
+together, named for the two faces it lies between: `FR`, `FL`, `BL`, `BR`. The
+cross and four filled slots are the first two layers.
+
+**Pair**:
+The corner and the edge that belong in one slot. What an F2L case is about:
+where the pair's two pieces are and which way round each of them is. Read
+relative to the slot, so the same case in any of the four reads the same.
+
 **Scramble**:
 The sequence handed to the cuber to apply to a solved cube before an attempt.
 Always free of rotations, so the last layer is always the layer on top.
@@ -39,7 +49,7 @@ One stage of the CFOP method: Cross, F2L, OLL or PLL.
 
 **Case**:
 A configuration a phase can present, identified by name — `T perm`, `OLL 21`.
-There are 21 PLL cases and 57 OLL cases.
+There are 21 PLL cases, 57 OLL cases and 41 F2L cases.
 
 **Case Set**:
 A named group of cases a cuber has chosen to work on. Belongs to one phase, so
@@ -47,10 +57,10 @@ two phases can each have a set of the same name.
 
 **Group**:
 A family of cases that look alike and are therefore learned and recognised
-together: the fish shapes, the G perms. A few are structural facts about the
-cube — every edge already oriented, no edge oriented — and the rest are
-silhouettes, which is a fact about how a case looks rather than one the cube
-can be asked about.
+together: the fish shapes, the G perms, the pair still up in the top layer. Some
+are structural facts about the cube — every edge already oriented, both pieces
+of the pair still in the slot — and the rest are silhouettes, which is a fact
+about how a case looks rather than one the cube can be asked about.
 
 **Catalogue**:
 Every case of one phase, together with the phase's name, the order its groups
@@ -81,9 +91,17 @@ _Avoid_: Grill.
 One timed attempt at one known case during a drill. Has a case; has no phases.
 
 **Solve**:
-One timed attempt at a whole scrambled cube. Has phases; has no case, because
-which case arises depends on how the cuber chose to build F2L, which the
-application never sees.
+One timed attempt at a scrambled cube. Has phases; has no case, because which
+case arises depends on how the cuber chose to build F2L, which the application
+never sees.
+
+**Whole solve**:
+A solve run all the way to a solved cube. Only these reach the solve averages. A
+run that stops at an earlier boundary — timing only the cross, say — is the same
+activity with fewer boundaries and is recorded the same way, but stays out of
+those averages and keeps its splits instead: a cross time is a time, and
+averaged in with solve times it makes a number about nothing. It also leaves the
+cuber holding a part-solved cube, which the next scramble cannot assume.
 
 **Session**:
 One sitting at the timer: a single drill, or a single run of solves.
@@ -97,3 +115,15 @@ is not a time.
 Timing a solve as separate phases by having the cuber signal each boundary,
 rather than recording one duration. Timing only the cross is this with a single
 boundary, not a separate activity.
+
+**Boundary**:
+A point in a solve where the cuber presses the timer, closing one split and
+starting the next. Which boundaries a run has is chosen before it starts, and
+the run ends at the last of them. One boundary, at the end, is a plain timer.
+
+**Split**:
+The time between two boundaries, recorded under the phases it covers. A phase
+nobody asked for a boundary at is not lost — it is folded into the next split
+and named there, so a run with boundaries at Cross and PLL records a `Cross`
+split and an `F2L+OLL+PLL` one, because that is honestly what the second
+covers.
