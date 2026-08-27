@@ -12,7 +12,7 @@ import pygame
 
 from ..cases import CATALOGUES
 from ..cube import Cube
-from ..cube.notation import move_count
+from ..cube.notation import NotationError, format_sequence, move_count, parse
 from ..store import Store
 from ..store.stats import case_report, phase_summary, rank_by_weakness, solve_summary
 from ..trainer.sampler import RoundRobinSampler
@@ -162,6 +162,7 @@ class PickerScreen(Screen):
         self.cursor = 0
         self.prompt = None
         self.prompt_text = ""
+        self.prompt_error = None
         self.message = None
         restored = (app.store.load_case_set(LAST_USED, self.phase)
                     if mode == "select" else None)
@@ -255,7 +256,63 @@ class PickerScreen(Screen):
             self._step_vertically(-1)
         elif self.mode == "select":
             return self._handle_selection(key)
+        else:
+            return self._handle_browse(key)
         return None
+
+    def _handle_browse(self, key):
+        """The library is where a cuber's own algorithm belongs.
+
+        It is already the screen that shows the algorithm, so it is the screen
+        that changes it. Nothing here touches the scramble: that is the inverse
+        of the case's setup and stays so, or the promise that a scramble lands
+        on the case it names stops being checkable.
+        """
+        if key == pygame.K_e:
+            self.prompt = "algorithm"
+            self.prompt_text = algorithm_for(self.current, self.app.overrides)
+            self.prompt_error = None
+        elif key == pygame.K_r:
+            case = self.current
+            if case.id in self.app.overrides:
+                self.app.store.clear_algorithm(case.id)
+                self._reread_overrides()
+                self.message = f"{case.name}: back to the shipped algorithm"
+            else:
+                self.message = f"{case.name} is already the shipped algorithm"
+        return None
+
+    def _reread_overrides(self):
+        """The application re-reads these when a screen is popped, which is too
+        late to see your own algorithm in the panel you just typed it into."""
+        self.app.overrides = self.app.store.algorithm_overrides()
+
+    def _keep_algorithm(self):
+        """Store what was typed, if it actually solves the case.
+
+        Returns whether it was kept. A refusal leaves the prompt open with the
+        text in it, because something nearly right is worth correcting rather
+        than retyping.
+        """
+        case, typed = self.current, self.prompt_text.strip()
+        if not typed:
+            self.prompt_error = "type an algorithm, or esc to leave it alone"
+            return False
+        try:
+            outcome = case.outcome_of(typed)
+        except NotationError as unknown:
+            self.prompt_error = str(unknown)
+            return False
+        if outcome == "unsolved":
+            self.prompt_error = f"that does not solve {case.name}"
+            return False
+        if outcome == "rotated":
+            self.prompt_error = "that solves it but leaves the cube turned round"
+            return False
+        self.app.store.set_algorithm(case.id, format_sequence(parse(typed)))
+        self._reread_overrides()
+        self.message = f"{case.name}: your algorithm"
+        return True
 
     def _handle_selection(self, key):
         if key == pygame.K_SPACE:
@@ -291,7 +348,10 @@ class PickerScreen(Screen):
         if event.key == pygame.K_ESCAPE:
             self.prompt = None
         elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-            if self.prompt == "save" and self.prompt_text.strip():
+            if self.prompt == "algorithm":
+                if not self._keep_algorithm():
+                    return None
+            elif self.prompt == "save" and self.prompt_text.strip():
                 chosen = [c.id for c in self.order if c.id in self.selected]
                 self.app.store.save_case_set(
                     self.prompt_text.strip(), self.phase, chosen)
@@ -299,6 +359,7 @@ class PickerScreen(Screen):
             self.prompt = None
         elif event.key == pygame.K_BACKSPACE:
             self.prompt_text = self.prompt_text[:-1]
+            self.prompt_error = None
         elif self.prompt == "load" and event.unicode.isdigit():
             names = [n for n in self.app.store.case_set_names(self.phase)
                      if n != LAST_USED]
@@ -308,8 +369,9 @@ class PickerScreen(Screen):
                 self.selected = set(loaded or [])
                 self.message = f"loaded {names[index]!r}"
                 self.prompt = None
-        elif self.prompt == "save" and event.unicode.isprintable():
+        elif self.prompt in ("save", "algorithm") and event.unicode.isprintable():
             self.prompt_text += event.unicode
+            self.prompt_error = None
         return None
 
     def draw(self, surface):
@@ -375,15 +437,18 @@ class PickerScreen(Screen):
         theme.text(surface, case.description, (panel.left + 16, panel.top + 44), 17, TEXT_DIM)
         algorithm = algorithm_for(case, self.app.overrides)
         theme.text(surface, algorithm, (panel.right - 16, panel.top + 14), 20, ACCENT, right=True)
-        theme.text(surface, f"{move_count(algorithm)} moves",
-                   (panel.right - 16, panel.top + 46), 16, TEXT_DIM, right=True)
+        moves = f"{move_count(algorithm)} moves"
+        if case.id in self.app.overrides:
+            moves = "yours   " + moves
+        theme.text(surface, moves, (panel.right - 16, panel.top + 46), 16,
+                   TEXT_DIM, right=True)
 
     def _draw_help(self, surface):
         if self.mode == "select":
             hint = ("arrows move   space toggles   g whole group   a all   n none   "
                     "s save set   o open set   enter start   esc back")
         else:
-            hint = "arrows move   esc back"
+            hint = "arrows move   e your algorithm   r shipped one   esc back"
         theme.text(surface, self.message or hint,
                    (WINDOW[0] // 2, WINDOW[1] - 30), 16,
                    ACCENT if self.message else TEXT_DIM, centre=True)
@@ -395,7 +460,22 @@ class PickerScreen(Screen):
         box = pygame.Rect(0, 0, 620, 200)
         box.center = (WINDOW[0] // 2, WINDOW[1] // 2)
         pygame.draw.rect(surface, PANEL, box, border_radius=10)
-        if self.prompt == "save":
+        if self.prompt == "algorithm":
+            case = self.current
+            theme.text(surface, f"Your algorithm for {case.name}",
+                       (box.centerx, box.top + 22), 24, TEXT, True, centre=True)
+            theme.text(surface, self.prompt_text + "_", (box.centerx, box.top + 74),
+                       22, ACCENT, centre=True)
+            if self.prompt_error:
+                theme.text(surface, self.prompt_error, (box.centerx, box.top + 118),
+                           17, DANGER, centre=True)
+            else:
+                theme.text(surface, "it has to solve the case and give the cube back"
+                           " as you picked it up", (box.centerx, box.top + 118), 16,
+                           TEXT_DIM, centre=True)
+            theme.text(surface, "enter to keep, esc to cancel",
+                       (box.centerx, box.bottom - 34), 16, TEXT_DIM, centre=True)
+        elif self.prompt == "save":
             theme.text(surface, "Name this case set", (box.centerx, box.top + 26), 24, TEXT, True, centre=True)
             theme.text(surface, self.prompt_text + "_", (box.centerx, box.top + 80), 26, ACCENT, centre=True)
             theme.text(surface, "enter to save, esc to cancel", (box.centerx, box.bottom - 40), 16, TEXT_DIM, centre=True)

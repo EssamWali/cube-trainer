@@ -12,9 +12,11 @@ from cubetrainer.cases import CATALOGUES, pll
 from cubetrainer.cube import Cube
 from cubetrainer.store import Store
 from cubetrainer.store.stats import case_report
+from cubetrainer.trainer.scramble import scramble_for
 from cubetrainer.trainer.timer import TimerState
 from cubetrainer.ui import render
 from cubetrainer.ui.app import (SOLVE_PHASES, App, DrillScreen, HomeScreen,
+                               algorithm_for,
                                PickerScreen, SolveScreen, SolveSetupScreen,
                                StatsScreen, solve_split_labels)
 from cubetrainer.ui.theme import ACCENT, READY
@@ -982,3 +984,143 @@ def test_discarding_a_finished_attempt_amends_it_rather_than_adding_one(app):
     key_down(solve, app, pygame.K_d)
     assert len(app.store.solves()) == 1, "discarding twice discarded twice"
     assert solve.dnfs == 1
+
+
+# --- your own algorithm -----------------------------------------------------
+
+#: The M-slice Ua perm: a real algorithm for the case, nothing like the shipped
+#: one, so a test cannot pass by accident on a string that merely looks right.
+MINE = "M2 U M U2 M' U M2"
+
+
+def a_library(application, case_id="Ua"):
+    library = PickerScreen(application, mode="browse", catalogue=pll.CATALOGUE)
+    library.cursor = library.order.index(pll.get(case_id))
+    return library
+
+
+def type_algorithm(library, application, text, submit=True):
+    """Open the prompt, clear what it was filled with, and type."""
+    key_down(library, application, pygame.K_e)
+    for _ in range(len(library.prompt_text)):
+        key_down(library, application, pygame.K_BACKSPACE)
+    for character in text:
+        key_down(library, application, pygame.K_a, unicode=character)
+    if submit:
+        key_down(library, application, pygame.K_RETURN)
+    return library
+
+
+def test_the_prompt_starts_from_the_algorithm_on_screen(app):
+    """Most of the time a cuber is changing a move or two, not writing one out."""
+    library = a_library(app)
+    key_down(library, app, pygame.K_e)
+    assert library.prompt == "algorithm"
+    assert library.prompt_text == pll.get("Ua").algorithm
+
+
+def test_the_library_keeps_your_own_algorithm(app):
+    library = type_algorithm(a_library(app), app, MINE)
+    assert library.prompt is None
+    assert app.store.algorithm_overrides() == {"Ua": MINE}
+    assert algorithm_for(pll.get("Ua"), app.overrides) == MINE, \
+        "the panel still shows the shipped algorithm you just replaced"
+    library.draw(pygame.Surface((1180, 780)))
+
+
+def test_an_algorithm_that_does_not_solve_the_case_is_refused(app):
+    library = type_algorithm(a_library(app), app, "R U R'")
+    assert library.prompt == "algorithm", "the prompt closed on a refusal"
+    assert library.prompt_text == "R U R'", "what was typed was thrown away"
+    assert "Ua perm" in library.prompt_error
+    assert app.store.algorithm_overrides() == {}
+    library.draw(pygame.Surface((1180, 780)))
+
+
+def test_an_algorithm_that_leaves_the_cube_turned_round_is_refused(app):
+    library = type_algorithm(a_library(app), app, MINE + " y")
+    assert library.prompt == "algorithm"
+    assert "turned round" in library.prompt_error
+    assert app.store.algorithm_overrides() == {}
+
+
+def test_a_sequence_the_cube_does_not_understand_is_refused(app):
+    library = type_algorithm(a_library(app), app, "R U Q")
+    assert library.prompt == "algorithm"
+    assert "Q" in library.prompt_error
+    assert app.store.algorithm_overrides() == {}
+
+
+def test_an_empty_algorithm_is_refused(app):
+    library = type_algorithm(a_library(app), app, "")
+    assert library.prompt == "algorithm"
+    assert app.store.algorithm_overrides() == {}
+
+
+def test_correcting_a_refusal_clears_what_it_said(app):
+    library = type_algorithm(a_library(app), app, "R U R'")
+    assert library.prompt_error
+    key_down(library, app, pygame.K_BACKSPACE)
+    assert library.prompt_error is None
+
+
+def test_the_shipped_algorithm_comes_back(app):
+    library = type_algorithm(a_library(app), app, MINE)
+    key_down(library, app, pygame.K_r)
+    assert app.store.algorithm_overrides() == {}
+    assert algorithm_for(pll.get("Ua"), app.overrides) == pll.get("Ua").algorithm
+    key_down(library, app, pygame.K_r)
+    assert app.store.algorithm_overrides() == {}
+
+
+def test_your_algorithm_is_what_the_drill_reveals(app):
+    type_algorithm(a_library(app), app, MINE)
+    drill = DrillScreen(app, ["Ua"])
+    key_down(drill, app, pygame.K_p)
+    assert drill.peeked
+    assert algorithm_for(drill.case, app.overrides) == MINE
+    drill.draw(pygame.Surface((1180, 780)))
+
+
+def test_seconds_per_move_is_counted_off_your_algorithm(app):
+    """Ranking by seconds per move is the default signal, and a cuber using a
+    seven-move algorithm is not doing eleven moves' worth of work."""
+    drill = DrillScreen(app, ["Ua"])
+    do_a_rep(drill, app, start=0.0, finish=2.5)
+    key_down(drill, app, pygame.K_ESCAPE)
+
+    shipped = StatsScreen(app).reports[0].seconds_per_move
+    type_algorithm(a_library(app), app, MINE)
+    mine = StatsScreen(app).reports[0].seconds_per_move
+    assert shipped != mine
+    assert mine == pytest.approx(1.8 / 7, abs=1e-6)
+
+
+def test_your_algorithm_does_not_change_the_scramble(app):
+    """A scramble is the inverse of the case's setup, not of the algorithm on
+    screen. An override changes what the trainer tells you to do; it must never
+    change what it hands you, or the promise that a scramble lands on the case
+    it names stops being checkable."""
+    case = pll.get("Ua")
+    before = scramble_for(case, randomise_angle=False)
+    type_algorithm(a_library(app), app, MINE)
+    assert scramble_for(case, randomise_angle=False) == before
+    assert Cube.solved().apply(before).apply(case.algorithm).is_solved()
+
+
+def test_your_algorithm_survives_a_restart(app):
+    """Overrides live in their own table so that updating the application never
+    overwrites what someone has learned."""
+    type_algorithm(a_library(app), app, MINE)
+    again = App(store=app.store, seed=1)
+    assert algorithm_for(pll.get("Ua"), again.overrides) == MINE
+
+
+def test_an_override_for_a_case_nobody_recognises_breaks_nothing(app):
+    """History outlives the case list, and so does an algorithm someone chose
+    for a case that is no longer in it."""
+    app.store.set_algorithm("NotACase", "R U R'")
+    app.overrides = app.store.algorithm_overrides()
+    surface = pygame.Surface((1180, 780))
+    a_library(app).draw(surface)
+    StatsScreen(app).draw(surface)

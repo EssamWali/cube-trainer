@@ -10,6 +10,7 @@ reaching for one.
 from dataclasses import dataclass
 
 from ..cube.notation import derotate, format_sequence, invert
+from ..cube.state import Cube
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,24 @@ class Case:
         up, and the last layer is always the layer on top.
         """
         return format_sequence(derotate(invert(self.algorithm)))
+
+    def outcome_of(self, algorithm):
+        """What `algorithm` does to this case: "solved", "rotated" or "unsolved".
+
+        Three answers rather than two, because solving the case and leaving the
+        cube turned round is its own mistake and the one worth naming. A cube
+        judged face by face against its own centres is solved either way, which
+        is the right answer to "is this cube solved" and the wrong bar for an
+        algorithm: one that ends on a regrip it never takes back is ambiguous
+        as data, since which case it solves depends on how you were holding the
+        cube when you finished. That defect reached the shipped PLL data twice.
+
+        Raises NotationError if the sequence is not one the cube understands.
+        """
+        cube = Cube().apply(self.setup).apply(algorithm)
+        if cube == Cube():
+            return "solved"
+        return "rotated" if cube.is_solved() else "unsolved"
 
     @property
     def is_self_inverse(self):
