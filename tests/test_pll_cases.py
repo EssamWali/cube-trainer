@@ -20,6 +20,7 @@ from cubetrainer.cases.pattern import (
     is_first_two_layers_solved,
     is_last_layer_oriented,
     is_pll_state,
+    u_layer_cycles,
     u_layer_permutation,
 )
 from cubetrainer.cube import Cube, parse
@@ -184,6 +185,62 @@ def test_adjusting_the_upper_face_does_not_change_the_case(case):
     base = Cube.solved().apply(case.setup)
     for auf in ("U", "U2", "U'"):
         assert case_key(base.apply(auf)) == case_key(base)
+
+
+@pytest.mark.parametrize("case", pll.PLL_CASES, ids=lambda c: c.id)
+def test_the_cycles_a_case_shows_are_the_same_from_every_angle(case):
+    """What a case does is a fact about the case, not about where the layer
+    happens to be turned to.
+
+    Read as "where does this piece belong", a T perm met a quarter turn round
+    has every piece away from home and reads as seven pieces travelling rather
+    than four. That reading is true and it is not the case: it is the case plus
+    an upper-face adjustment the cuber has not made yet. Divided out, every
+    angle has to give the same answer, up to holding the cube round the other
+    way.
+    """
+    base = Cube.solved().apply(case.setup)
+    canonical = u_layer_cycles(base)
+    angles = _class_of(canonical)
+    for auf in ("U", "U2", "U'"):
+        seen = u_layer_cycles(base.apply(auf))
+        assert seen in angles, f"{case.id} after {auf} shows different cycles"
+
+
+@pytest.mark.parametrize("case", pll.PLL_CASES, ids=lambda c: c.id)
+def test_a_case_never_shows_more_pieces_travelling_than_it_moves(case):
+    """The count is what a cuber reads the case off, so an angle may not add
+    to it. Nothing here exceeds the six a G perm moves."""
+    def travelling(state):
+        return sum(1 for permutation in state
+                   for slot, home in enumerate(permutation) if slot != home)
+
+    base = Cube.solved().apply(case.setup)
+    moved = travelling(u_layer_cycles(base))
+    assert 3 <= moved <= 6, f"{case.id} shows {moved} pieces travelling"
+    for auf in ("U", "U2", "U'"):
+        assert travelling(u_layer_cycles(base.apply(auf))) == moved
+
+
+@pytest.mark.parametrize("case", pll.PLL_CASES, ids=lambda c: c.id)
+def test_the_cycles_shown_are_one_upper_face_adjustment_from_the_truth(case):
+    """The cycles are a reading of the state, not a nicer-looking invention.
+
+    They may differ from where the pieces belong by exactly one adjustment of
+    the upper face -- the one the cuber is about to make -- and it has to be
+    the same adjustment for the corners and the edges, because there is only
+    one upper face to turn.
+    """
+    base = Cube.solved().apply(case.setup)
+    for auf in ("", "U", "U2", "U'"):
+        state = base.apply(auf) if auf else base
+        offsets = {
+            (home - place) % 4
+            for shown, actual in zip(u_layer_cycles(state),
+                                     u_layer_permutation(state))
+            for place, home in zip(shown, actual)
+        }
+        assert len(offsets) == 1, f"{case.id} at {auf!r} is not one adjustment"
 
 
 def test_groups_have_their_canonical_sizes():

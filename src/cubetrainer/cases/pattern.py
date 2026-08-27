@@ -71,6 +71,49 @@ def u_layer_permutation(cube):
     return tuple(corners), tuple(edges)
 
 
+def u_layer_cycles(cube):
+    """Where each U-layer piece travels once the upper face has been adjusted.
+
+    `u_layer_permutation` answers where every piece belongs, which is the whole
+    truth about the state and the wrong reading to draw. A T perm met a quarter
+    turn round has no piece at home, so that reading calls for seven arrows
+    over a case that moves four pieces, and what the cuber is shown stops
+    looking like the case they are learning.
+
+    The AUF is what the extra arrows are, so it is divided out. The cuber
+    adjusts the upper face before they start; this is what is left to do once
+    they have, still read at the angle they are holding the cube now.
+
+    Which of the four adjustments is taken is decided by what a cuber is
+    taught, in this order: fewest pieces travelling, then the shortest longest
+    cycle, then fewest corners travelling. The middle one is the G perms. Every
+    adjustment moves six of their pieces, but one shows two corners trading and
+    four edges going round, and the other shows corners and edges each cycling
+    in threes -- which is the G perms, and is the reason they are a family. Read
+    the other way a G perm wears a corner swap it does not have, which is the
+    one thing a cuber must not see on it.
+    """
+    reading = u_layer_permutation(cube)
+
+    def adjusted(auf):
+        return tuple(tuple((home - auf) % 4 for home in permutation)
+                     for permutation in reading)
+
+    def travelling(permutation):
+        return sum(1 for slot, home in enumerate(permutation) if slot != home)
+
+    def longest(permutation):
+        return max(cycle_structure(permutation), default=0)
+
+    def taught_shape(candidate):
+        corners, edges = candidate
+        return (travelling(corners) + travelling(edges),
+                max(longest(corners), longest(edges)),
+                travelling(corners), candidate)
+
+    return min((adjusted(auf) for auf in range(4)), key=taught_shape)
+
+
 def u_layer_orientation(cube):
     """How each U-layer piece is turned.
 

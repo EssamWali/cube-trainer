@@ -34,11 +34,16 @@ TILE_FOCUS = (58, 67, 84)
 # as loose confetti.
 DIAGRAM = (22, 24, 29)
 
-# An arrow crosses yellow stickers and the near-black lines between them, so it
-# carries its own contrast instead of borrowing it: a dark line inside a pale
-# casing is legible over either.
+# An arrow crosses yellow stickers and the lines between them, so it carries
+# its own contrast instead of borrowing it: a dark line inside a pale casing is
+# legible over either. The casing is a rim and not a second line -- wide enough
+# to separate an arrow from what it crosses, narrow enough that what a cuber
+# sees is the dark arrow rather than a white one with a dark core.
 ARROW = (14, 15, 19)
-ARROW_CASING = (247, 248, 252)
+ARROW_CASING = (250, 250, 248)
+
+#: How far the casing stands out past the ink, as a share of a sticker's width.
+CASING_WIDTH = 0.02
 
 # An orientation diagram asks one question of every sticker -- is it facing up
 # -- so it is drawn in the two colours that question has answers. The upper

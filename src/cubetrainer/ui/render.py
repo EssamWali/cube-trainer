@@ -9,21 +9,22 @@ above, ringed by the side stickers of the pieces in it.
 
 How it is coloured follows from what the state is. A last layer already
 oriented is a permutation case, so it is drawn in true colours with arrows
-showing where each piece has to go. A last layer not yet oriented is an
-orientation case, so it is drawn in two tones -- facing up, or not -- and no
-arrows, because an arrow says where a piece has to travel and an orientation
-case is not about where anything travels. Both readings come from the same
-state, which is why the picture and the scramble cannot disagree.
+showing where each piece has to go once the upper face is adjusted. A last
+layer not yet oriented is an orientation case, so it is drawn in two tones --
+facing up, or not -- and no arrows, because an arrow says where a piece has to
+travel and an orientation case is not about where anything travels. Both
+readings come from the same state, which is why the picture and the scramble
+cannot disagree.
 """
 
 import math
 
 import pygame
 
-from ..cases.pattern import CENTRE_U, is_last_layer_oriented, u_layer_permutation
-from .theme import (ACCENT, ARROW, ARROW_CASING, DIAGRAM, FACE_COLOURS,
-                    GRID_LINE, HIDDEN, ORIENTED, READY, TEXT, TEXT_DIM, TILE,
-                    TILE_FOCUS, UNORIENTED, font)
+from ..cases.pattern import CENTRE_U, is_last_layer_oriented, u_layer_cycles
+from .theme import (ACCENT, ARROW, ARROW_CASING, CASING_WIDTH, DIAGRAM,
+                    FACE_COLOURS, GRID_LINE, HIDDEN, ORIENTED, READY, TEXT,
+                    TEXT_DIM, TILE, TILE_FOCUS, UNORIENTED, font)
 
 #: Height a thumbnail keeps below the picture for the case's name.
 LABEL_STRIP = 18
@@ -111,7 +112,7 @@ def draw_case(surface, cube, rect, arrows=True, hidden=False):
         pygame.draw.rect(surface, GRID_LINE, area, 1)
 
     if arrows and not hidden and not two_tone:
-        _draw_permutation_arrows(surface, cube, inner, cell)
+        _draw_permutation_arrows(surface, cube, rect)
 
 
 def _centre_of(grid_position, inner, cell):
@@ -119,76 +120,144 @@ def _centre_of(grid_position, inner, cell):
     return (inner.left + (column + 0.5) * cell, inner.top + (row + 0.5) * cell)
 
 
-def _draw_permutation_arrows(surface, cube, inner, cell):
-    """One arrow per displaced piece, from where it is to where it belongs."""
+def arrow_paths(cube, rect):
+    """The arrows a case calls for, as (from, to, points-both-ways) triples.
+
+    Read with the AUF divided out, so the picture shows the case rather than
+    how far round the layer happens to be turned: a cuber met by a T perm at an
+    angle has to see a T perm, and an arrow off every piece is true and
+    useless.
+
+    Two pieces that trade places get one arrow with a head at each end, not two
+    arrows lying on top of each other. Drawn as two, each one's head sits under
+    the other one's shaft, and a swap -- which is most of PLL -- comes out
+    looking like a smudge with a point on it.
+    """
+    inner, cell, _ = _frame(rect)
+    if not is_last_layer_oriented(cube):
+        return []  # an orientation case is not about where anything travels
     try:
-        corners, edges = u_layer_permutation(cube)
+        corners, edges = u_layer_cycles(cube)
     except ValueError:
-        return  # not a last-layer case; nothing meaningful to point at
+        return []  # not a last-layer case; nothing meaningful to point at
+    paths = []
     for permutation, grid in ((corners, CORNER_GRID), (edges, EDGE_GRID)):
-        for slot, home in enumerate(permutation):
-            if slot == home:
+        drawn = set()
+        for slot, destination in enumerate(permutation):
+            if slot == destination or slot in drawn:
                 continue
-            start = _centre_of(grid[slot], inner, cell)
-            end = _centre_of(grid[home], inner, cell)
-            _draw_arrow(surface, start, end, cell)
+            trade = permutation[destination] == slot
+            drawn.add(slot)
+            if trade:
+                drawn.add(destination)
+            paths.append((_centre_of(grid[slot], inner, cell),
+                          _centre_of(grid[destination], inner, cell), trade))
+    return paths
 
 
 def arrow_shaft_width(cell):
     """How thick an arrow's shaft is drawn, for a face of `cell`-wide stickers.
 
-    Deliberately thin. A case like the H perm crosses one small square with
-    four arrows at once, and a heavy line turns that into a scribble nobody
-    can trace a single piece through. The head carries the meaning; the shaft
-    only has to be followable.
+    Deliberately thin. A case like the H perm sends arrows across one small
+    square at once, and a heavy line turns that into a scribble nobody can
+    trace a single piece through. The head carries the meaning; the shaft only
+    has to be followable.
     """
-    return max(1, round(cell * 0.045))
+    return max(1, round(cell * 0.06))
 
 
-def _draw_arrow(surface, start, end, cell):
-    """One arrow, from where a piece is to where it belongs.
+def _arrow_outline(start, end, both_ways, cell):
+    """One arrow as a single closed shape: shaft and head drawn as one.
 
-    The shaft stops where the head begins rather than running under it, so the
-    head stays a clean triangle instead of a blob with a line through it.
+    A line with a triangle laid over its end is two shapes pretending to be
+    one, and every seam between them shows -- a notch where the head meets the
+    shaft, and a shaft that has to stop short and leave a gap when it does not.
+    Traced as one outline there is nothing to line up, and the whole arrow can
+    be filled, and grown into its casing, in one piece.
     """
     dx, dy = end[0] - start[0], end[1] - start[1]
     length = math.hypot(dx, dy)
     if length < 1:
-        return
+        return None
     ux, uy = dx / length, dy / length
     inset = cell * 0.22
     span = length - 2 * inset
     if span <= 0:
-        return
-    # A hop to the next sticker leaves little room. The head gives way rather
-    # than overrunning the tail, so that even the shortest arrow keeps a shaft
-    # long enough to say which two stickers it joins.
-    barb = min(cell * 0.28, span * 0.5)
+        return None
+    # A hop to the next sticker leaves little room, and a swap wants room for
+    # two heads. The heads give way rather than overrunning each other, so that
+    # even the shortest arrow keeps a shaft long enough to say which two
+    # stickers it joins.
+    heads = 2 if both_ways else 1
+    barb = min(cell * 0.3, span / (heads + 1))
+    spread = barb * 0.44
+    half = arrow_shaft_width(cell) / 2
+    tip = (end[0] - ux * inset, end[1] - uy * inset)
     tail = (start[0] + ux * inset, start[1] + uy * inset)
-    head = (end[0] - ux * inset, end[1] - uy * inset)
-    neck = (head[0] - ux * barb, head[1] - uy * barb)
-    spread = barb * 0.42
-    left = (neck[0] - uy * spread, neck[1] + ux * spread)
-    right = (neck[0] + uy * spread, neck[1] - ux * spread)
-    shaft = arrow_shaft_width(cell)
-    casing = max(1, round(cell * 0.03))
-    pygame.draw.line(surface, ARROW_CASING, tail, neck, shaft + 2 * casing)
-    pygame.draw.polygon(surface, ARROW_CASING,
-                        _spread_out([head, left, right], casing))
-    pygame.draw.line(surface, ARROW, tail, neck, shaft)
-    pygame.draw.polygon(surface, ARROW, [head, left, right])
+
+    def offset(point, along, across):
+        return (point[0] + ux * along - uy * across,
+                point[1] + uy * along + ux * across)
+
+    neck = offset(tip, -barb, 0)
+    points = [tip, offset(neck, 0, spread), offset(neck, 0, half)]
+    if both_ways:
+        back = offset(tail, barb, 0)
+        points += [offset(back, 0, half), offset(back, 0, spread), tail,
+                   offset(back, 0, -spread), offset(back, 0, -half)]
+    else:
+        points += [offset(tail, 0, half), offset(tail, 0, -half)]
+    return points + [offset(neck, 0, -half), offset(neck, 0, -spread)]
 
 
-def _spread_out(points, amount):
-    """The same shape, `amount` pixels bigger in every direction."""
-    centre_x = sum(x for x, _ in points) / len(points)
-    centre_y = sum(y for _, y in points) / len(points)
-    grown = []
-    for x, y in points:
-        dx, dy = x - centre_x, y - centre_y
-        away = math.hypot(dx, dy) or 1.0
-        grown.append((x + dx / away * amount, y + dy / away * amount))
-    return grown
+#: Directions the ink is stamped in to grow an arrow into its casing. A ring
+#: rather than an outward push from the middle: an arrow is long and thin, and
+#: pushing its corners away from its centre stretches it lengthwise instead of
+#: thickening it evenly.
+_RING = tuple((math.cos(math.tau * i / 12), math.sin(math.tau * i / 12))
+              for i in range(12))
+
+#: How many times over the arrows are drawn before being scaled back down.
+#: pygame draws hard-edged shapes, and a hard-edged diagonal a pixel or two
+#: wide is a staircase. Drawing it large and shrinking it is what turns those
+#: steps into the smooth edge the rest of the diagram already has.
+OVERSAMPLE = 4
+
+
+def _draw_permutation_arrows(surface, cube, rect):
+    """Every arrow the case calls for, drawn together rather than one by one.
+
+    Together, because the order matters: one arrow's casing laid over another
+    arrow's ink rubs it out, and with several arrows crossing -- an H perm, a G
+    perm -- there is always a pair where that happens. So every casing goes
+    down first and every arrow on top of the lot of them.
+    """
+    inner, cell, _ = _frame(rect)
+    outlines = [outline for start, end, both_ways in arrow_paths(cube, rect)
+                if (outline := _arrow_outline(start, end, both_ways, cell))]
+    if not outlines:
+        return
+    scale = OVERSAMPLE if inner.width <= 320 else 2
+    layer = pygame.Surface((inner.width * scale, inner.height * scale),
+                           pygame.SRCALPHA)
+    # Transparent, but transparent *in the casing's colour*: scaling down
+    # averages the colour of every pixel it merges, including the ones nothing
+    # was drawn on, and averaging towards an unset black leaves a dirty rim
+    # around everything.
+    layer.fill(ARROW_CASING + (0,))
+
+    def placed(outline, shift=(0, 0)):
+        return [((x - inner.left) * scale + shift[0],
+                 (y - inner.top) * scale + shift[1]) for x, y in outline]
+
+    grown = max(1.0, cell * CASING_WIDTH) * scale
+    for outline in outlines:
+        for dx, dy in _RING:
+            pygame.draw.polygon(layer, ARROW_CASING,
+                                placed(outline, (dx * grown, dy * grown)))
+    for outline in outlines:
+        pygame.draw.polygon(layer, ARROW, placed(outline))
+    surface.blit(pygame.transform.smoothscale(layer, inner.size), inner.topleft)
 
 
 def draw_thumbnail(surface, cube, rect, label, cursor=False, chosen=False,

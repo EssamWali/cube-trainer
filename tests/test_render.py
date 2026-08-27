@@ -12,7 +12,7 @@ import pytest
 
 from cubetrainer.cases import oll, pll
 from cubetrainer.cube import Cube
-from cubetrainer.ui import render
+from cubetrainer.ui import render, theme
 from cubetrainer.ui.theme import (ARROW, ARROW_CASING, DIAGRAM, FACE_COLOURS,
                                   HIDDEN, ORIENTED, UNORIENTED)
 
@@ -27,6 +27,9 @@ FURNITURE = {DIAGRAM, (1, 2, 3), (30, 33, 39)}
 def _pygame():
     pygame.init()
     yield
+    # A Font outlives the pygame session that made it and draws nothing at all
+    # afterwards, so the cache goes when the session does.
+    theme.reset_fonts()
     pygame.quit()
 
 
@@ -106,18 +109,22 @@ def test_side_stickers_tell_two_cases_with_the_same_top_apart():
         assert len(pictures) == len(cases),             f"{[c.id for c in cases]} are drawn identically"
 
 
+def _picture(cube, **kwargs):
+    """The diagram as bytes, for asking whether two of them differ at all."""
+    surface = pygame.Surface((260, 260))
+    surface.fill((1, 2, 3))
+    render.draw_case(surface, cube, RECT, **kwargs)
+    return pygame.image.tostring(surface, "RGB")
+
+
 def test_no_permutation_arrows_are_drawn_for_an_orientation_case():
     """An arrow says where a piece has to travel. That is a true sentence about
     a permutation case and a wrong answer about an orientation one."""
-    drawn = []
-    original = render._draw_arrow
-    render._draw_arrow = lambda *a, **k: drawn.append(a)
-    try:
-        for case in oll.OLL_CASES:
-            render.draw_case(pygame.Surface((260, 260)), _state(case), RECT)
-        assert drawn == []
-    finally:
-        render._draw_arrow = original
+    for case in oll.OLL_CASES:
+        state = _state(case)
+        assert render.arrow_paths(state, RECT) == [], case.id
+        assert _picture(state, arrows=True) == _picture(state, arrows=False), \
+            f"{case.id} was drawn something an orientation case has no use for"
 
 
 def test_hidden_blanks_an_orientation_case():
@@ -142,14 +149,10 @@ def test_a_permutation_case_keeps_its_true_colours():
 
 
 def test_a_permutation_case_still_draws_its_arrows():
-    drawn = []
-    original = render._draw_arrow
-    render._draw_arrow = lambda *a, **k: drawn.append(a)
-    try:
-        render.draw_case(pygame.Surface((260, 260)), _state(pll.get("T")), RECT)
-        assert drawn, "the T perm moves pieces, so something has to point at them"
-    finally:
-        render._draw_arrow = original
+    state = _state(pll.get("T"))
+    assert render.arrow_paths(state, RECT), \
+        "the T perm moves pieces, so something has to point at them"
+    assert _picture(state, arrows=True) != _picture(state, arrows=False)
 
 
 def test_hidden_blanks_a_permutation_case():
@@ -159,39 +162,36 @@ def test_hidden_blanks_a_permutation_case():
 
 # --- arrows stay readable when several cross --------------------------------
 
-def _arrow_ink(cube, rect, arrows):
-    """Pixels the arrows paint inside the upper face, and the face itself."""
-    surface = pygame.Surface((rect.width + 40, rect.height + 40))
-    surface.fill((1, 2, 3))
-    render.draw_case(surface, cube, rect, arrows=arrows)
+def _changed_by_arrows(cube, rect):
+    """Pixels inside the upper face that the arrows alter, and the face itself.
+
+    Counted as a difference rather than by looking for the arrow's own colours,
+    because a smoothed edge is a blend of the arrow and what it lies on and is
+    no particular colour at all.
+    """
+    def painted(arrows):
+        surface = pygame.Surface((rect.width + 40, rect.height + 40))
+        surface.fill((1, 2, 3))
+        render.draw_case(surface, cube, rect, arrows=arrows)
+        return surface
+
+    bare, marked = painted(False), painted(True)
     cells = render.face_grid(rect)
     face = cells[0].union(cells[-1])
     ink = sum(1 for x in range(face.left, face.right)
               for y in range(face.top, face.bottom)
-              if surface.get_at((x, y))[:3] in (ARROW, ARROW_CASING))
+              if bare.get_at((x, y)) != marked.get_at((x, y)))
     return ink, face
 
 
-def _arrows_drawn(case):
-    """Every arrow drawn for `case`, as (start, end, head-polygon)."""
-    arrows, heads = [], []
-    draw_arrow, polygon = render._draw_arrow, pygame.draw.polygon
+def _heads(cube):
+    """How many arrowheads the diagram draws: a trade shows one at each end."""
+    return sum(2 if both_ways else 1
+               for _, _, both_ways in render.arrow_paths(cube, RECT))
 
-    def spy_arrow(surface, start, end, cell):
-        arrows.append((start, end, len(heads)))
-        return draw_arrow(surface, start, end, cell)
 
-    def spy_polygon(surface, colour, points, *a, **k):
-        if colour == ARROW:
-            heads.append(points)
-        return polygon(surface, colour, points, *a, **k)
-
-    render._draw_arrow, pygame.draw.polygon = spy_arrow, spy_polygon
-    try:
-        render.draw_case(pygame.Surface((260, 260)), _state(case), RECT)
-    finally:
-        render._draw_arrow, pygame.draw.polygon = draw_arrow, polygon
-    return [(start, end, heads[index]) for start, end, index in arrows]
+def _nearer(colour, target, than):
+    return math.dist(colour[:3], target) < math.dist(colour[:3], than)
 
 
 def test_the_shaft_is_thin_at_the_size_a_thumbnail_draws_it():
@@ -199,22 +199,21 @@ def test_the_shaft_is_thin_at_the_size_a_thumbnail_draws_it():
     line there is a scribble."""
     assert render.arrow_shaft_width(20) == 1
     for cell in range(8, 120):
-        # A twentieth of a sticker, give or take the whole pixel it rounds to.
-        assert render.arrow_shaft_width(cell) <= max(1, cell * 0.05 + 0.5)
+        # A sixteenth of a sticker, give or take the whole pixel it rounds
+        # to, against a head about four times that across.
+        assert render.arrow_shaft_width(cell) <= max(1, cell * 0.065 + 0.5)
         assert render.arrow_shaft_width(cell) >= 1
 
 
-def test_arrows_leave_the_face_readable_when_four_of_them_cross():
+def test_arrows_leave_the_face_readable_when_they_cross_the_middle():
     """The H perm sends every edge across the middle at once. If the arrows are
     heavy the face turns into one dark smear, which is what a cuber means by
     jumbled -- so the ink they add is budgeted."""
     thumbnail = pygame.Rect(0, 0, 74, 74)
-    state = _state(pll.get("H"))
-    without, face = _arrow_ink(state, thumbnail, arrows=False)
-    with_arrows, _ = _arrow_ink(state, thumbnail, arrows=True)
-    assert without == 0, "the arrow colours belong to the arrows alone"
-    assert with_arrows > 0, "no arrows were drawn at all"
-    assert with_arrows < 0.2 * face.width * face.height,         f"arrows cover {with_arrows / (face.width * face.height):.0%} of the face"
+    ink, face = _changed_by_arrows(_state(pll.get("H")), thumbnail)
+    assert ink > 0, "no arrows were drawn at all"
+    assert ink < 0.2 * face.width * face.height, \
+        f"arrows cover {ink / (face.width * face.height):.0%} of the face"
 
 
 def test_an_arrow_carries_its_own_contrast():
@@ -225,22 +224,122 @@ def test_an_arrow_carries_its_own_contrast():
     surface = pygame.Surface((260, 260))
     surface.fill((1, 2, 3))
     render.draw_case(surface, _state(pll.get("T")), RECT)
-    painted = {surface.get_at((x, y))[:3]
-               for x in range(RECT.width) for y in range(RECT.height)}
-    assert ARROW in painted, "the arrows themselves were not drawn"
-    assert ARROW_CASING in painted, "the arrows have nothing to stand out against"
+    painted = [surface.get_at((x, y))[:3]
+               for x in range(RECT.width) for y in range(RECT.height)]
+    assert any(math.dist(c, ARROW) < 12 for c in painted), \
+        "the arrows themselves were not drawn"
+    assert any(math.dist(c, ARROW_CASING) < 12 for c in painted), \
+        "the arrows have nothing to stand out against"
 
 
-def test_every_arrow_ends_in_an_arrow_head():
+def test_the_edges_of_an_arrow_are_smoothed():
+    """A hard-edged diagonal a couple of pixels wide is a staircase, and it is
+    the one thing in the diagram that is not straight lines and flat colour. An
+    arrow has to arrive at the sticker colour through something, or those steps
+    are what a cuber sees."""
+    surface = pygame.Surface((260, 260))
+    render.draw_case(surface, _state(pll.get("Y")), RECT)
+    yellow = FACE_COLOURS["U"]
+    span = math.dist(ARROW, yellow)
+    blends = {surface.get_at((x, y))[:3]
+              for x in range(RECT.width) for y in range(RECT.height)}
+    between = [c for c in blends
+               if math.dist(c, ARROW) > 20 and math.dist(c, yellow) > 20
+               and math.dist(c, ARROW) + math.dist(c, yellow) < 1.15 * span]
+    assert len(between) > 8, \
+        "the arrow meets the sticker in one step, so its edges are stepped"
+
+
+# --- one arrow per pair of pieces, not two lying on each other --------------
+
+def test_two_pieces_that_trade_places_share_a_single_arrow():
+    """Drawn as two arrows, each one's head is buried under the other one's
+    shaft and its casing, and the pair reads as a line with a smudge on it. A
+    trade is one arrow with a head at each end."""
+    paths = render.arrow_paths(_state(pll.get("T")), RECT)
+    assert len(paths) == 2, "the T perm trades two pairs, so it draws two arrows"
+    assert all(both_ways for _, _, both_ways in paths)
+    assert _heads(_state(pll.get("T"))) == 4
+
+
+def test_no_two_arrows_are_drawn_along_the_same_line():
+    """Whatever the case, nothing is drawn twice in the same place: that is what
+    puts one arrow's casing over another arrow's ink."""
+    for case in pll.PLL_CASES:
+        for auf in ("", "U", "U2", "U'"):
+            state = _state(case)
+            paths = render.arrow_paths(state.apply(auf) if auf else state, RECT)
+            lines = [frozenset((tuple(map(round, a)), tuple(map(round, b))))
+                     for a, b, _ in paths]
+            assert len(set(lines)) == len(lines), f"{case.id} at {auf!r}"
+
+
+def test_a_trade_is_unbroken_ink_from_one_head_to_the_other():
+    """The bug this replaces, stated as a picture: walk the line between two
+    pieces that swap and you must not meet the casing, because the only way the
+    casing gets in there is one arrow being drawn over another."""
+    state = _state(pll.get("T"))
+    surface = pygame.Surface((260, 260))
+    render.draw_case(surface, state, RECT)
+    for start, end, both_ways in render.arrow_paths(state, RECT):
+        assert both_ways
+        # Inside the arrow: it starts a fifth of a sticker short of the
+        # centre it points from, and stops the same short of the one it
+        # points at.
+        for step in range(15, 86):
+            along = step / 100
+            point = (round(start[0] + (end[0] - start[0]) * along),
+                     round(start[1] + (end[1] - start[1]) * along))
+            assert _nearer(surface.get_at(point), ARROW, ARROW_CASING), \
+                f"the casing shows at {along:.0%} along a trade"
+
+
+# --- heads point where the piece is going -----------------------------------
+
+def test_every_arrow_ends_in_a_head_at_the_end_it_points_at():
     """The line says two pieces are involved; only the head says which way."""
-    drawn = _arrows_drawn(pll.get("T"))
-    assert drawn, "the T perm moves pieces, so something has to point at them"
-    assert all(len(head) == 3 for _, _, head in drawn)
+    for case_id in ("Ua", "T", "Ga", "V"):
+        for start, end, both_ways in render.arrow_paths(_state(pll.get(case_id)), RECT):
+            outline = render._arrow_outline(start, end, both_ways, 80)
+            tip = outline[0]
+            assert math.dist(tip, end) < math.dist(tip, start), \
+                f"{case_id}: the head is nearer where the piece came from"
+            if both_ways:
+                assert any(math.dist(p, start) < math.dist(p, end)
+                           for p in outline), f"{case_id}: a trade has one head"
 
 
-def test_the_head_sits_at_the_end_the_piece_is_going_to():
-    """A head on the wrong end is a wrong answer, not a blemish."""
-    for case_id in ("Ua", "T", "Ga"):
-        for start, end, head in _arrows_drawn(pll.get(case_id)):
-            tip = head[0]
-            assert math.dist(tip, end) < math.dist(tip, start),                 f"{case_id}: the head is nearer where the piece came from"
+def test_a_case_met_at_an_angle_is_drawn_with_the_arrows_of_its_case():
+    """A drill hands out the case at one of its four angles, so the cuber has an
+    upper-face adjustment to make before the algorithm applies. Drawn as "where
+    does each piece belong", that adjustment puts an arrow on nearly every
+    piece and a T perm stops looking like a T perm -- which leaves the picture
+    unusable for the one thing it is there for."""
+    for case in pll.PLL_CASES:
+        square = _heads(_state(case))
+        for auf in ("U", "U2", "U'"):
+            angled = _state(case).apply(auf)
+            assert _heads(angled) == square, \
+                f"{case.id} after {auf} points at {_heads(angled)}, not {square}"
+
+
+def test_the_t_perm_swaps_two_pairs_from_every_angle():
+    """The case a cuber is likeliest to meet, spelled out: two corners and two
+    edges, two arrows, four heads, whichever way round the layer is turned."""
+    for auf in ("", "U", "U2", "U'"):
+        state = _state(pll.get("T"))
+        state = state.apply(auf) if auf else state
+        paths = render.arrow_paths(state, RECT)
+        assert len(paths) == 2, f"after {auf!r}: {len(paths)} arrows"
+        assert all(both_ways for _, _, both_ways in paths), f"after {auf!r}"
+
+
+def test_every_case_draws_as_a_thumbnail_at_every_angle():
+    """The picker draws all 21 at once, and a drill any of them at any angle."""
+    surface = pygame.Surface((1180, 780))
+    for index, case in enumerate(pll.PLL_CASES):
+        for auf in ("", "U", "U2", "U'"):
+            state = _state(case)
+            rect = pygame.Rect((index % 8) * 140, (index // 8) * 140, 132, 132)
+            render.draw_thumbnail(surface, state.apply(auf) if auf else state,
+                                  rect, case.id)
