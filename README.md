@@ -188,6 +188,7 @@ pytest
 
 ## Not built yet
 
-Nothing named. All three phases drill, the timer splits a solve however you ask
-it to, and the statistics rank each phase on its own.
+Nothing named. OLL and PLL drill, F2L is there to read rather than drill, the
+timer splits a solve however you ask it to, and the statistics rank each drilled
+phase on its own.
 
