@@ -8,7 +8,7 @@ somebody presses the keys.
 import pygame
 import pytest
 
-from cubetrainer.cases import CATALOGUES, pll
+from cubetrainer.cases import CATALOGUES, Case, Catalogue, pll
 from cubetrainer.cube import Cube
 from cubetrainer.store import Store
 from cubetrainer.store.stats import case_report
@@ -412,25 +412,32 @@ def test_a_rep_is_recorded_against_a_session_tagged_with_its_phase(app, catalogu
     assert session["kind"] == "drill"
 
 
+def _lands_on(state, promised):
+    """Whether two states are the same case, whichever phase the case is of.
+
+    Each phase has its own answer to "same case", because each asks a different
+    question of the cube: where the last layer's pieces belong, which way they
+    face, or where one pair is. The reading is picked by what the state is, the
+    way the picture is."""
+    from cubetrainer.cases.pattern import (case_key, is_last_layer_oriented,
+                                           is_oll_state, is_pll_state,
+                                           orientation_key, pair_key,
+                                           slot_in_progress)
+    slot = slot_in_progress(promised)
+    if slot is not None:
+        return (slot_in_progress(state) == slot
+                and pair_key(state, slot) == pair_key(promised, slot))
+    if is_last_layer_oriented(promised):
+        return is_pll_state(state) and case_key(state) == case_key(promised)
+    return is_oll_state(state) and orientation_key(state) == orientation_key(promised)
+
+
 def test_the_scramble_produces_the_case_being_drilled_in_any_phase(app, catalogue):
     """The trainer's central claim, for whichever phase is being drilled."""
-    from cubetrainer.cases.pattern import (
-        case_key,
-        is_last_layer_oriented,
-        is_oll_state,
-        is_pll_state,
-        orientation_key,
-    )
     drill = DrillScreen(app, [c.id for c in catalogue], catalogue)
     for _ in range(25):
-        state = Cube.solved().apply(drill.scramble)
-        promised = Cube.solved().apply(drill.case.setup)
-        if is_last_layer_oriented(promised):
-            assert is_pll_state(state)
-            assert case_key(state) == case_key(promised)
-        else:
-            assert is_oll_state(state)
-            assert orientation_key(state) == orientation_key(promised)
+        assert _lands_on(Cube.solved().apply(drill.scramble),
+                         Cube.solved().apply(drill.case.setup)), drill.case.id
         do_a_rep(drill, app)
         key_down(drill, app, pygame.K_SPACE)
 
@@ -598,13 +605,13 @@ def test_solve_summaries_are_not_affected_by_the_phase_on_show(app):
 
 def test_the_statistics_can_be_given_the_phases_to_rank(app):
     """Handed one phase, it ranks that phase and offers no other."""
-    pll, oll = app.catalogues
-    drill_a_few(app, oll, first_ids(oll)[0])
-    stats = StatsScreen(app, catalogues=[oll])
-    assert stats.catalogue is oll
-    assert [r.case_id for r in stats.reports] == first_ids(oll)
+    one = app.catalogues[1]
+    drill_a_few(app, one, first_ids(one)[0])
+    stats = StatsScreen(app, catalogues=[one])
+    assert stats.catalogue is one
+    assert [r.case_id for r in stats.reports] == first_ids(one)
     key_down(stats, app, pygame.K_RIGHT)
-    assert stats.catalogue is oll
+    assert stats.catalogue is one
 
 
 # --- choosing cases ---------------------------------------------------------
@@ -1207,3 +1214,78 @@ def test_an_override_for_a_case_nobody_recognises_breaks_nothing(app):
     surface = pygame.Surface((1180, 780))
     a_library(app).draw(surface)
     StatsScreen(app).draw(surface)
+
+
+# --- three phases, one set of screens ---------------------------------------
+
+def test_every_phase_the_trainer_has_is_offered(app):
+    """The home screen names no phase. It builds a drill and a library for each
+    catalogue it is handed, so a phase arriving is data."""
+    labels = [label for label, _ in HomeScreen(app).items]
+    for catalogue in app.catalogues:
+        assert f"Drill {catalogue.phase}" in labels
+        assert f"{catalogue.phase} algorithm library" in labels
+    assert {"PLL", "OLL", "F2L"} <= {c.phase for c in app.catalogues}
+
+
+def test_a_phase_the_trainer_has_never_heard_of_is_offered_too(app):
+    """The claim behind all of this, tested rather than asserted: hand the
+    screens a catalogue nobody wrote them for and they offer it."""
+    invented = Catalogue("XLL", (Case("XLL 1", "XLL 1", "Odd ones",
+                                      "R U R' U'", "a made-up case"),), ("Odd ones",))
+    app.catalogues = app.catalogues + (invented,)
+    labels = [label for label, _ in HomeScreen(app).items]
+    assert "Drill XLL" in labels
+    assert "XLL algorithm library" in labels
+
+    picker = PickerScreen(app, mode="select", catalogue=invented)
+    assert [case.id for case in picker.order] == ["XLL 1"]
+    picker.draw(pygame.Surface((1180, 780)))
+    StatsScreen(app).draw(pygame.Surface((1180, 780)))
+
+
+def test_the_picker_shows_all_forty_one_f2l_cases_by_family(app):
+    f2l_catalogue = next(c for c in app.catalogues if c.phase == "F2L")
+    picker = PickerScreen(app, mode="select", catalogue=f2l_catalogue)
+    assert len(picker.order) == 41
+    assert [group for group, _, _ in picker.blocks] == list(f2l_catalogue.group_order)
+    picker.draw(pygame.Surface((1180, 780)))
+
+
+def test_drilling_a_phase_and_pressing_at_its_boundary_stay_apart(app):
+    """"F2L" names a phase you can drill and a boundary you can press at while
+    timing a solve. A rep is a rep and a split is a split, and neither may show
+    up in the other's figures."""
+    f2l_catalogue = next(c for c in app.catalogues if c.phase == "F2L")
+    case_id, = first_ids(f2l_catalogue)
+    drill_a_few(app, f2l_catalogue, case_id, count=2)
+
+    solve = SolveScreen(app, SOLVE_PHASES)
+    do_a_solve(solve, app, start=100.0, presses=(102.0, 110.0, 114.0, 118.0))
+    key_down(solve, app, pygame.K_ESCAPE)
+
+    assert len(app.store.reps(phase="F2L")) == 2, "a split was counted as a rep"
+    assert len(app.store.solves()) == 1
+    assert [s["phase"] for s in app.store.splits()] == list(SOLVE_PHASES)
+    assert app.store.practised_case_ids("F2L") == [case_id], \
+        "a phase split reached the per-case ranking"
+
+    stats = show_phase(StatsScreen(app), app, f2l_catalogue)
+    assert [r.case_id for r in stats.reports] == [case_id]
+    assert stats.reports[0].attempts == 2
+    stats.draw(pygame.Surface((1180, 780)))
+
+
+def test_an_f2l_rep_ends_on_a_solved_cube_like_any_other(app):
+    """Worth checking rather than assuming. A real F2L insert leaves the last
+    layer scrambled, so it would be fair to expect this drill to need a reset
+    afterwards the way a run that stops at the cross does. It does not: the
+    scramble is the inverse of the algorithm, so adjusting the upper face and
+    executing takes the whole cube back to solved -- as true of an F2L case as
+    of an OLL one, and the reason the drill needed no changes at all."""
+    f2l_catalogue = next(c for c in app.catalogues if c.phase == "F2L")
+    for case in f2l_catalogue:
+        drill = DrillScreen(app, [case.id], f2l_catalogue)
+        state = Cube.solved().apply(drill.scramble)
+        assert any(state.apply(auf).apply(case.algorithm).is_solved()
+                   for auf in ("", "U", "U2", "U'")), case.id

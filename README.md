@@ -2,8 +2,9 @@
 
 Targeted scramble generation and timing for practising CFOP on a physical 3x3.
 
-Pick the PLL or OLL cases you want to work on. The trainer hands you a scramble
-that leaves a solved cube showing exactly one of them, hides which one it is,
+Pick the F2L, OLL or PLL cases you want to work on. The trainer hands you a
+scramble that leaves a solved cube showing exactly one of them, hides which one
+it is,
 and times you WCA-style while you recognise and solve it. It records every rep,
 so it can tell you which cases you are actually slow at rather than which
 algorithms happen to be long.
@@ -31,10 +32,10 @@ cube-trainer practice.sqlite3
 
 ## Using it
 
-**Drill PLL** and **Drill OLL** — choose cases, then drill them. It is the same
-screen and the same keys for both, because it is the same drill; only the cases
-differ. A case set you save belongs to the phase you saved it in, so "hard" can
-mean one thing in PLL and another in OLL.
+**Drill PLL**, **Drill OLL** and **Drill F2L** — choose cases, then drill them.
+It is the same screen and the same keys for all three, because it is the same
+drill; only the cases differ. A case set you save belongs to the phase you saved
+it in, so "hard" can mean one thing in PLL and another in F2L.
 
 | key | |
 | --- | --- |
@@ -50,8 +51,14 @@ rather than eighteen. Chosen cases are ringed in green; the cursor is the ring
 inside the tile. Your last selection comes back next time you open the picker.
 
 Cases are grouped the way they are taught — five families for PLL, fifteen for
-OLL — because "I am slow at the fish shapes" is a sentence someone says and "I
-am slow at 9, 10, 35, 37" is not. `g` takes a whole family at once.
+OLL, four for F2L — because "I am slow at the fish shapes" is a sentence someone
+says and "I am slow at 9, 10, 35, 37" is not. `g` takes a whole family at once.
+
+F2L is the odd one out. It has no names everybody uses and no one published list
+of algorithms, so its cases are numbered and the ones shipped are the shortest
+solution to each out of the standard triggers — see
+[ADR 0003](docs/adr/0003-f2l-algorithms-are-computed-not-transcribed.md). Set
+your own with `e` in the library.
 
 In the drill, hold `space` until it turns green, release to start, and press it
 again when the cube is solved. The case is hidden while you work: recognising
@@ -169,6 +176,6 @@ pytest
 
 ## Not built yet
 
-F2L. It is a phase everywhere in the vocabulary and in the phase splits, but
-there are no F2L cases to drill, only a boundary to press at.
+Nothing named. All three phases drill, the timer splits a solve however you ask
+it to, and the statistics rank each phase on its own.
 
