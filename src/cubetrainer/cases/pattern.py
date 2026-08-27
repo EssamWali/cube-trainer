@@ -223,28 +223,6 @@ def cycle_structure(permutation):
     return tuple(sorted(cycles, reverse=True))
 
 
-def compose(outer, inner):
-    """The permutation applying `inner` and then `outer`."""
-    return tuple(outer[inner[i]] for i in range(len(inner)))
-
-
-def invert_permutation(permutation):
-    result = [0] * len(permutation)
-    for i, target in enumerate(permutation):
-        result[target] = i
-    return tuple(result)
-
-
-def permutation_order(permutation):
-    """How many times the permutation must repeat to return to the start."""
-    identity = tuple(range(len(permutation)))
-    current, order = permutation, 1
-    while current != identity:
-        current = compose(current, permutation)
-        order += 1
-    return order
-
-
 # --- the first two layers ---------------------------------------------------
 #
 # A last-layer case is about one layer, and the tables above describe it slot by

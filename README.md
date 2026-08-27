@@ -136,10 +136,13 @@ One phase at a time, with the arrow keys to switch, over the phases that are
 drilled. An OLL case and a PLL case in the same ranking would be two
 incomparable things in one list.
 
-Above the ranking: your solve count with its mean, ao5 and ao12, and the mean of
-every phase split you have recorded. Only whole solves reach the averages. A
-cross time is a time, but averaged in with solve times it makes a number about
-nothing, so a run that stopped early keeps its splits and stays out of the mean.
+Above the ranking: your solve count with its mean, ao5 and ao12, your best
+single, ao5 and ao12 under those, and the mean of every phase split you have
+recorded. An average you do not have enough solves for yet is left out rather
+than shown as a DNF — three solves in, "ao5 DNF" would read as a failure that
+never happened. Only whole solves reach the averages. A cross time is a time,
+but averaged in with solve times it makes a number about nothing, so a run that
+stopped early keeps its splits and stays out of the mean.
 
 ## How it works
 

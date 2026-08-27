@@ -1121,16 +1121,8 @@ class StatsScreen(Screen):
         theme.text(surface, f"sorted by {label}  (tab to change)",
                    (WINDOW[0] - 40, 36), 19, ACCENT, right=True)
 
-        solves = self.app.store.solves(whole_only=True)
         splits = self.app.store.splits()
-        top = 84
-        if solves:
-            summary = solve_summary(solves)
-            line = (f"{summary['count']} solves    mean {theme.format_time(summary['mean'])}"
-                    f"    ao5 {theme.format_time(summary['ao5'])}"
-                    f"    ao12 {theme.format_time(summary['ao12'])}")
-            theme.text(surface, line, (40, top), 20, TEXT)
-            top += 30
+        top = self._draw_solve_summary(surface, 84)
         if splits:
             phases = phase_summary(splits)
             line = "   ".join(
@@ -1175,6 +1167,40 @@ class StatsScreen(Screen):
             top += 28
 
         self._draw_help(surface)
+
+    def _draw_solve_summary(self, surface, top):
+        """Where a run of solves stands, and the best it has ever been.
+
+        The bests are the numbers a cuber is actually chasing, and they were
+        being worked out and thrown away every time this screen drew itself.
+
+        An average nobody has enough solves for yet is left out rather than
+        drawn. `format_time` says DNF for a missing time, which is the right
+        word for an attempt that failed and the wrong one for an average that
+        has not happened yet -- three solves in, "ao5 DNF" reads as a failure
+        that never occurred.
+        """
+        solves = self.app.store.solves(whole_only=True)
+        if not solves:
+            return top
+        summary = solve_summary(solves)
+
+        def figures(*wanted):
+            return "    ".join(f"{label} {theme.format_time(summary[key])}"
+                               for label, key in wanted
+                               if summary[key] is not None)
+
+        count = f"{summary['count']} solve" + ("" if summary["count"] == 1 else "s")
+        theme.text(surface, "    ".join(filter(None, [
+            count, figures(("mean", "mean"), ("ao5", "ao5"), ("ao12", "ao12"))])),
+            (MARGIN, top), 20, TEXT)
+        top += 30
+        best = figures(("best", "best"), ("best ao5", "best_ao5"),
+                       ("best ao12", "best_ao12"))
+        if best:
+            theme.text(surface, best, (MARGIN, top), 19, READY)
+            top += 28
+        return top
 
     def _draw_help(self, surface):
         phases = "   ".join(

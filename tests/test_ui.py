@@ -14,7 +14,7 @@ from cubetrainer.store import Store
 from cubetrainer.store.stats import case_report
 from cubetrainer.trainer.scramble import scramble_for
 from cubetrainer.trainer.timer import TimerState
-from cubetrainer.ui import render
+from cubetrainer.ui import render, theme
 from cubetrainer.ui.app import (SOLVE_PHASES, WHOLE_SOLVE, App, DrillScreen,
                                HomeScreen,
                                algorithm_for,
@@ -1320,3 +1320,84 @@ def test_f2l_is_read_but_not_drilled(app):
     ranked = StatsScreen(app)
     assert f2l_catalogue not in ranked.catalogues, \
         "a phase nobody can drill was given a ranking that can only be empty"
+
+
+# --- the numbers a cuber is actually chasing --------------------------------
+
+def lines_drawn(screen):
+    """Every line of text a screen puts on its surface, in the order it draws
+    them. Read back rather than reasoned about, because what is being tested
+    here is what a cuber sees."""
+    drawn = []
+    original = theme.text
+
+    def spy(surface, message, position, *args, **kwargs):
+        drawn.append(str(message))
+        return original(surface, message, position, *args, **kwargs)
+
+    theme.text = spy
+    try:
+        screen.draw(pygame.Surface((1180, 780)))
+    finally:
+        theme.text = original
+    return drawn
+
+
+def record_solves(app, seconds):
+    session = app.store.start_session("solve")
+    for time in seconds:
+        app.store.record_solve(session, "R U", time)
+    app.store.end_session(session)
+
+
+def test_the_statistics_show_the_bests_as_well_as_where_you_are_now(app):
+    """A personal best is the number a cuber is chasing. All three were being
+    worked out and thrown away every time this screen drew itself.
+
+    Five fast solves then five slow ones, so the current average and the best
+    one cannot be the same number by accident."""
+    record_solves(app, [10.0] * 5 + [30.0] * 5)
+    lines = lines_drawn(StatsScreen(app))
+
+    now = next(line for line in lines if line.startswith("10 solves"))
+    assert "mean 20.00" in now
+    assert "ao5 30.00" in now
+
+    best = next(line for line in lines if line.startswith("best "))
+    assert "best 10.00" in best
+    assert "best ao5 10.00" in best
+
+
+def test_an_average_nobody_has_enough_solves_for_is_not_called_a_dnf(app):
+    """`format_time` says DNF for a missing time, which is the right word for an
+    attempt that failed and the wrong one for an average that has not happened
+    yet. Three solves in, "ao5 DNF" reads as a failure that never occurred."""
+    record_solves(app, [10.0, 11.0, 12.0])
+    lines = lines_drawn(StatsScreen(app))
+    assert any(line.startswith("3 solves") for line in lines)
+    assert not any("DNF" in line for line in lines), \
+        "an average that has not happened yet was drawn as a failure"
+    assert not any("ao5" in line for line in lines), \
+        "an average of five was drawn from three solves"
+
+
+def test_one_solve_is_a_solve(app):
+    record_solves(app, [12.34])
+    lines = lines_drawn(StatsScreen(app))
+    assert any(line.startswith("1 solve ") or line == "1 solve" for line in lines)
+    assert not any(line.startswith("1 solves") for line in lines)
+
+
+def test_a_run_of_solves_that_all_failed_says_so_by_saying_nothing(app):
+    """Every solve a DNF leaves no mean and no best to report. The count is the
+    honest thing to draw, and a mean of nothing is not."""
+    session = app.store.start_session("solve")
+    for _ in range(3):
+        app.store.record_solve(session, "R U", None, penalty="dnf")
+    lines = lines_drawn(StatsScreen(app))
+    assert "3 solves" in lines
+    assert not any(line.startswith("best") for line in lines)
+
+
+def test_the_statistics_draw_with_no_solves_at_all(app):
+    assert not any(line.startswith("best") for line in lines_drawn(StatsScreen(app)))
